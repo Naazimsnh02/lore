@@ -90,6 +90,10 @@ class DocumentaryOrchestrator:
         ConversationManager instance (Task 16).
     session_memory:
         SessionMemoryManager instance (Task 3).
+    lore_mode_handler:
+        LoreModeHandler instance (Task 21).  When provided, the
+        ``lore_mode_workflow`` uses full multimodal fusion.  When absent,
+        falls back to the basic topic fusion.
     on_stream_element:
         Optional async callback invoked for each content element as it is
         produced.  Signature: ``async (session_id, element) -> None``.
@@ -106,6 +110,7 @@ class DocumentaryOrchestrator:
         voice_mode_handler: Any = None,
         conversation_manager: Any = None,
         session_memory: Any = None,
+        lore_mode_handler: Any = None,
         on_stream_element: Optional[
             Callable[[str, ContentElement], Any]
         ] = None,
@@ -117,6 +122,7 @@ class DocumentaryOrchestrator:
         self._voice_mode = voice_mode_handler
         self._conversation_manager = conversation_manager
         self._session_memory = session_memory
+        self._lore_mode_handler = lore_mode_handler
         self._on_stream_element = on_stream_element
         self._assembler = StreamAssembler()
         self._failures: list[TaskFailure] = []
@@ -381,9 +387,87 @@ class DocumentaryOrchestrator:
     ) -> DocumentaryStream:
         """LoreMode: camera + voice fusion → parallel content generation.
 
-        Combines location recognition from the camera with the voice topic
-        to create a fused documentary context.
+        Enhanced with LoreModeHandler (Task 21):
+          1. Process camera + voice concurrently via LoreModeHandler
+          2. FusionEngine merges visual, verbal, and GPS contexts
+          3. Detect alternate history requests and route accordingly
+          4. Run parallel content generation from fused context
+          5. Assemble interleaved stream
+
+        Requirements: 4.1, 4.2, 4.3, 4.5, 4.6.
         """
+        # Use LoreModeHandler if available for full fusion pipeline
+        if self._lore_mode_handler:
+            return await self._lore_mode_workflow_with_handler(request)
+
+        # Fallback: basic fusion without dedicated handler
+        return await self._lore_mode_workflow_basic(request)
+
+    async def _lore_mode_workflow_with_handler(
+        self, request: DocumentaryRequest
+    ) -> DocumentaryStream:
+        """LoreMode workflow using LoreModeHandler for full fusion."""
+        from ..lore_mode.models import LoreModeEvent
+
+        response = await self._lore_mode_handler.process_multimodal_input(
+            camera_frame=request.camera_frame,
+            voice_audio=request.voice_audio,
+            voice_topic=request.voice_topic,
+            gps_location=request.gps_location,
+            timestamp=request.timestamp,
+            session_id=request.session_id,
+            user_id=request.user_id,
+            language=request.language,
+            previous_topics=request.previous_topics,
+        )
+
+        # Route alternate history requests
+        if response.event == LoreModeEvent.ALTERNATE_HISTORY:
+            alt_request = request.model_copy(
+                update={
+                    "voice_topic": response.payload.get("what_if_query", request.voice_topic),
+                }
+            )
+            return await self.alternate_history_workflow(alt_request)
+
+        # Handle errors / no context
+        if response.event == LoreModeEvent.ERROR or response.fused_context is None:
+            error_msg = response.payload.get("detail", "LoreMode fusion failed")
+            return self._empty_stream(request, error=error_msg)
+
+        ctx = response.fused_context
+
+        narration_elements, illustration_elements, fact_elements = (
+            await self._parallel_generate(
+                mode="lore",
+                topic=ctx.fused_topic,
+                place_name=ctx.place_name,
+                place_description=ctx.place_description,
+                place_types=ctx.place_types,
+                visual_description=ctx.visual_description,
+                latitude=ctx.latitude,
+                longitude=ctx.longitude,
+                depth_dial=request.depth_dial,
+                language=ctx.language or request.language,
+                session_id=request.session_id,
+                user_id=request.user_id,
+                previous_topics=request.previous_topics,
+            )
+        )
+
+        return self._assembler.assemble(
+            request_id=request.request_id,
+            session_id=request.session_id,
+            mode=Mode.LORE,
+            narration_elements=narration_elements,
+            illustration_elements=illustration_elements,
+            fact_elements=fact_elements,
+        )
+
+    async def _lore_mode_workflow_basic(
+        self, request: DocumentaryRequest
+    ) -> DocumentaryStream:
+        """Fallback LoreMode workflow without LoreModeHandler."""
         # Recognise location from camera
         doc_context = await self._recognise_location(request)
         place_name = ""
