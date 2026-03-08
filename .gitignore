@@ -19,6 +19,7 @@ __pycache__/
 .venv/
 venv/
 .env
+.hypothesis/
 
 # Flutter
 mobile/.dart_tool/
