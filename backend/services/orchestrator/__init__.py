@@ -15,17 +15,25 @@ from .models import (
     WorkflowResult,
 )
 from .orchestrator import DocumentaryOrchestrator
-from .stream_assembler import StreamAssembler
+from .stream_assembler import (
+    ContentSynchronizer,
+    StreamAssembler,
+    StreamBuffer,
+    get_element_duration,
+)
 
 __all__ = [
     "ContentElement",
     "ContentElementType",
+    "ContentSynchronizer",
     "DocumentaryOrchestrator",
     "DocumentaryRequest",
     "DocumentaryStream",
     "Mode",
     "OrchestratorError",
     "StreamAssembler",
+    "StreamBuffer",
     "TaskFailure",
     "WorkflowResult",
+    "get_element_duration",
 ]
