@@ -7,6 +7,7 @@ Requirements:
   3.1  — VoiceMode voice → documentary
   4.1  — LoreMode camera + voice fusion
   5.1  — Generate interleaved documentary content
+  12.1 — Historical character encounters
   13.1 — Branch documentaries up to 3 levels deep
   15.1 — Alternate history scenarios
   21.1 — ADK-based orchestration with Gemini 3 Flash Preview
@@ -25,6 +26,7 @@ The DocumentaryOrchestrator coordinates all generation services:
   - VoiceModeHandler  → voice transcription + topic parsing (Task 15)
   - ConversationManager → intent classification + context (Task 16)
   - SessionMemoryManager → persistence (Task 3)
+  - HistoricalCharacterManager → AI historical personas (Task 25)
 
 Parallel execution: narration, illustration, and search verification run
 concurrently via ``asyncio.gather`` (Req 21.2).  Each task is wrapped in
@@ -98,6 +100,10 @@ class DocumentaryOrchestrator:
         DepthDialManager instance (Task 24).  When provided, narration
         prompt instructions are enriched with depth-level guidance so
         generated content matches the requested complexity (Req 14.2–14.4).
+    historical_character_manager:
+        HistoricalCharacterManager instance (Task 25).  When provided,
+        historical character encounters are offered during LoreMode
+        workflows when the context has historical significance (Req 12.1).
     on_stream_element:
         Optional async callback invoked for each content element as it is
         produced.  Signature: ``async (session_id, element) -> None``.
@@ -118,6 +124,7 @@ class DocumentaryOrchestrator:
         alternate_history_engine: Any = None,
         branch_documentary_manager: Any = None,
         depth_dial_manager: Any = None,
+        historical_character_manager: Any = None,
         on_stream_element: Optional[
             Callable[[str, ContentElement], Any]
         ] = None,
@@ -133,6 +140,7 @@ class DocumentaryOrchestrator:
         self._alternate_history = alternate_history_engine
         self._branch_manager = branch_documentary_manager
         self._depth_dial = depth_dial_manager
+        self._historical_character = historical_character_manager
         self._on_stream_element = on_stream_element
         self._assembler = StreamAssembler()
         self._failures: list[TaskFailure] = []
@@ -446,6 +454,45 @@ class DocumentaryOrchestrator:
             return self._empty_stream(request, error=error_msg)
 
         ctx = response.fused_context
+
+        # Offer historical character encounter if context warrants it (Req 12.1)
+        character_offer = None
+        if (
+            self._historical_character
+            and getattr(ctx, "enable_historical_characters", False)
+        ):
+            try:
+                character_offer = await self._historical_character.offer_character_encounter(
+                    location=ctx.place_name or "",
+                    topic=ctx.fused_topic or "",
+                    historical_period="",
+                    historical_significance=0.8,  # FusionEngine already validated
+                    place_types=ctx.place_types or [],
+                )
+                if character_offer:
+                    logger.info(
+                        "Historical character offered: %s (relevance=%.2f)",
+                        character_offer.character.name,
+                        character_offer.relevance_score,
+                    )
+                    # Push character offer to client via callback
+                    if self._on_stream_element:
+                        offer_element = ContentElement(
+                            type=ContentElementType.TRANSITION,
+                            transition_text=(
+                                f"[HISTORICAL CHARACTER] {character_offer.prompt_text} "
+                                f"{character_offer.ai_disclaimer}"
+                            ),
+                        )
+                        try:
+                            await self._on_stream_element(request.session_id, offer_element)
+                        except Exception:
+                            logger.warning("Failed to push character offer to client")
+            except Exception:
+                logger.warning(
+                    "Historical character offer failed — continuing without encounter",
+                    exc_info=True,
+                )
 
         narration_elements, illustration_elements, fact_elements = (
             await self._parallel_generate(

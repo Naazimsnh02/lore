@@ -94,6 +94,13 @@ class ChronicleExportPayload(BaseModel):
     sessionId: str
 
 
+class CharacterInteractionPayload(BaseModel):
+    """Payload for historical character interactions (Req 12.3)."""
+    action: str  # "accept" | "message" | "end"
+    message: str = ""
+    timestamp: int = 0
+
+
 # ── Validated incoming message wrapper ────────────────────────────────────────
 
 CLIENT_MESSAGE_TYPES = Literal[
@@ -106,6 +113,7 @@ CLIENT_MESSAGE_TYPES = Literal[
     "branch_request",
     "depth_dial_change",
     "chronicle_export",
+    "character_interaction",
 ]
 
 

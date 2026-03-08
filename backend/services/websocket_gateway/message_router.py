@@ -19,6 +19,7 @@ from .models import (
     BargeInPayload,
     BranchRequestPayload,
     CameraFramePayload,
+    CharacterInteractionPayload,
     ChronicleExportPayload,
     ClientMessage,
     ComponentsStatus,
@@ -60,6 +61,7 @@ class MessageRouter:
             "branch_request": self._handle_branch_request,
             "depth_dial_change": self._handle_depth_dial_change,
             "chronicle_export": self._handle_chronicle_export,
+            "character_interaction": self._handle_character_interaction,
         }
 
     async def route(
@@ -360,6 +362,98 @@ class MessageRouter:
         # When done, push a chronicle_ready message via connection_manager.send()
 
         return []
+
+    async def _handle_character_interaction(
+        self, client_id: str, message: ClientMessage
+    ) -> list[ServerMessage]:
+        """Handle historical character encounter interactions (Req 12.1–12.6).
+
+        Actions:
+          - "accept": Accept a character encounter offer and start conversation.
+          - "message": Send a message to the active historical character.
+          - "end": End the current character encounter.
+
+        Delegates to HistoricalCharacterManager (Task 25).
+        """
+        payload = CharacterInteractionPayload(**message.payload)
+        logger.info(
+            "Character interaction from client %s: action=%s",
+            client_id,
+            payload.action,
+        )
+
+        character_manager = self._cm.get_historical_character_manager(client_id)
+        if character_manager is None:
+            return [
+                self._error(
+                    "CHARACTER_NOT_AVAILABLE",
+                    "Historical character manager not initialised for this session",
+                )
+            ]
+
+        conn_info = self._cm.get_connection_info(client_id)
+        session_id = conn_info.session_id if conn_info else client_id
+
+        if payload.action == "accept":
+            # Accept the offered encounter — create persona
+            offer = await character_manager.offer_character_encounter(
+                location="", topic="",
+            )
+            if offer is None:
+                return [self._error("NO_CHARACTER_AVAILABLE", "No character encounter available")]
+
+            persona = await character_manager.create_character_persona(
+                offer.character, session_id=session_id,
+            )
+            return [
+                ServerMessage(
+                    type="status",
+                    payload={
+                        "event": "character_encounter_started",
+                        "characterName": persona.character.name,
+                        "historicalPeriod": persona.character.historical_period,
+                        "aiDisclaimer": persona.ai_disclaimer,
+                        "timestamp": int(time.time() * 1000),
+                    },
+                )
+            ]
+
+        elif payload.action == "message":
+            persona = character_manager.get_active_persona(session_id)
+            if persona is None:
+                return [self._error("NO_ACTIVE_CHARACTER", "No active character encounter")]
+
+            result = await character_manager.interact_with_character(
+                persona, payload.message,
+            )
+            return [
+                ServerMessage(
+                    type="documentary_content",
+                    payload={
+                        "event": "character_response",
+                        "characterName": result.character_name,
+                        "responseText": result.response_text,
+                        "accuracyVerified": result.accuracy_verified,
+                        "aiDisclaimer": result.ai_generated_disclaimer,
+                        "timestamp": int(time.time() * 1000),
+                    },
+                )
+            ]
+
+        elif payload.action == "end":
+            ended = character_manager.end_encounter(session_id)
+            return [
+                ServerMessage(
+                    type="status",
+                    payload={
+                        "event": "character_encounter_ended",
+                        "ended": ended,
+                        "timestamp": int(time.time() * 1000),
+                    },
+                )
+            ]
+
+        return [self._error("INVALID_ACTION", f"Unknown character action: {payload.action}")]
 
     # ── Utilities ──────────────────────────────────────────────────────────────
 
