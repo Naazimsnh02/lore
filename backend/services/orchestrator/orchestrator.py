@@ -111,6 +111,7 @@ class DocumentaryOrchestrator:
         conversation_manager: Any = None,
         session_memory: Any = None,
         lore_mode_handler: Any = None,
+        alternate_history_engine: Any = None,
         on_stream_element: Optional[
             Callable[[str, ContentElement], Any]
         ] = None,
@@ -123,6 +124,7 @@ class DocumentaryOrchestrator:
         self._conversation_manager = conversation_manager
         self._session_memory = session_memory
         self._lore_mode_handler = lore_mode_handler
+        self._alternate_history = alternate_history_engine
         self._on_stream_element = on_stream_element
         self._assembler = StreamAssembler()
         self._failures: list[TaskFailure] = []
@@ -570,9 +572,54 @@ class DocumentaryOrchestrator:
         """Alternate history: 'what if' scenarios grounded in real facts.
 
         Requirement 15.1 — speculative narration based on verified history.
+        Requirement 15.2 — plausible alternative narratives.
+        Requirement 15.3 — grounded in historical facts via SearchGrounder.
+        Requirement 15.4 — clearly label content as speculative.
+        Requirement 15.5 — explain causal reasoning.
+
+        When an AlternateHistoryEngine is available, uses it for structured
+        scenario extraction, historical grounding, causal reasoning, and
+        speculative labeling.  Falls back to prompt-based generation otherwise.
         """
         topic = request.voice_topic or request.branch_topic or "Unknown"
-        alt_topic = f"Alternate history: What if {topic}?"
+
+        # Use AlternateHistoryEngine for structured generation when available
+        custom_instructions: str
+        if self._alternate_history:
+            try:
+                scenario = await self._alternate_history.generate_scenario(
+                    question=topic,
+                    session_id=request.session_id,
+                    context_topic=", ".join(request.previous_topics[-3:])
+                    if request.previous_topics
+                    else "",
+                )
+                custom_instructions = (
+                    self._alternate_history.build_narration_instructions(scenario)
+                )
+                alt_topic = (
+                    f"Alternate history: {scenario.what_if_question.original_question}"
+                )
+            except Exception:
+                logger.warning(
+                    "AlternateHistoryEngine failed, falling back to basic generation",
+                    exc_info=True,
+                )
+                alt_topic = f"Alternate history: What if {topic}?"
+                custom_instructions = (
+                    "Generate a speculative 'what if' alternate history scenario. "
+                    "Ground the speculation in verified historical facts, then "
+                    "explore a plausible alternative timeline. Clearly distinguish "
+                    "between established facts and speculative elements."
+                )
+        else:
+            alt_topic = f"Alternate history: What if {topic}?"
+            custom_instructions = (
+                "Generate a speculative 'what if' alternate history scenario. "
+                "Ground the speculation in verified historical facts, then "
+                "explore a plausible alternative timeline. Clearly distinguish "
+                "between established facts and speculative elements."
+            )
 
         narration_elements, illustration_elements, fact_elements = (
             await self._parallel_generate(
@@ -583,14 +630,18 @@ class DocumentaryOrchestrator:
                 session_id=request.session_id,
                 user_id=request.user_id,
                 previous_topics=request.previous_topics,
-                custom_instructions=(
-                    "Generate a speculative 'what if' alternate history scenario. "
-                    "Ground the speculation in verified historical facts, then "
-                    "explore a plausible alternative timeline. Clearly distinguish "
-                    "between established facts and speculative elements."
-                ),
+                custom_instructions=custom_instructions,
             )
         )
+
+        # Label narration elements as speculative (Req 15.4)
+        for element in narration_elements:
+            if element.narration_text and not element.narration_text.startswith(
+                "[SPECULATIVE]"
+            ):
+                element.narration_text = (
+                    f"[SPECULATIVE] {element.narration_text}"
+                )
 
         return self._assembler.assemble(
             request_id=request.request_id,
