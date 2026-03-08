@@ -1,0 +1,4 @@
+# VoiceMode handler dependencies
+# Most deps are shared with the broader backend — listed here for traceability.
+pydantic==2.12.5
+google-genai==1.66.0
