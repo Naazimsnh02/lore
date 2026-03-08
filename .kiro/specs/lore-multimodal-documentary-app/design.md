@@ -1230,7 +1230,7 @@ interface CausalLink {
 **Configuration**:
 ```typescript
 interface GeminiLiveConfig {
-  model: 'gemini-2.0-flash-exp',
+  model: 'gemini-3-flash-preview',
   audioConfig: {
     sampleRate: 16000,
     encoding: 'LINEAR16',

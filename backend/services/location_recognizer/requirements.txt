@@ -1,0 +1,14 @@
+# LORE Location Recognizer dependencies
+# Python 3.11+
+
+# Data validation
+pydantic==2.12.5
+
+# Gemini SDK (vision + text generation)
+google-genai==1.19.0
+
+# Async HTTP client for Places API calls
+aiohttp==3.10.11
+
+# Google Cloud Logging
+google-cloud-logging==3.14.0

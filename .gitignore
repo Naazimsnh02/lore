@@ -3,6 +3,7 @@
 .claude/
 skills/
 skills-lock.json
+setup-and-deployment.md
 
 # Terraform — never commit real variable values or state
 infrastructure/terraform/terraform.tfvars
