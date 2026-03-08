@@ -3,3 +3,30 @@
 .claude/
 skills/
 skills-lock.json
+
+# Terraform — never commit real variable values or state
+infrastructure/terraform/terraform.tfvars
+infrastructure/terraform/*.tfplan
+infrastructure/terraform/.terraform/
+infrastructure/terraform/.terraform.lock.hcl
+infrastructure/terraform/terraform.tfstate
+infrastructure/terraform/terraform.tfstate.backup
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.env
+
+# Flutter
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/build/
+
+# GCP credentials
+*.json
+!package.json
+!pubspec.json
