@@ -294,18 +294,53 @@ class MessageRouter:
     async def _handle_depth_dial_change(
         self, client_id: str, message: ClientMessage
     ) -> list[ServerMessage]:
-        """Adjust content complexity for subsequent documentary segments."""
+        """Adjust content complexity for subsequent documentary segments (Req 14.5, 14.6).
+
+        Updates connection metadata and notifies the DepthDialManager so that
+        all subsequent content generation uses the new complexity level.
+        Already-generated content remains unchanged.
+        """
         payload = DepthDialChangePayload(**message.payload)
+        old_info = self._cm.get_connection_info(client_id)
+        old_level = old_info.depth_dial.value if old_info else "unknown"
+
         self._cm.update_depth_dial(client_id, payload.newLevel)
         logger.info(
-            "Client %s depth dial → %s",
+            "Client %s depth dial %s → %s",
             client_id,
+            old_level,
             payload.newLevel.value,
         )
 
-        # TODO(Task-12): notify Orchestrator to adapt future content generation
+        # Notify DepthDialManager if available (Task 24)
+        depth_dial_manager = self._cm.get_depth_dial_manager(client_id)
+        session_id = old_info.session_id if old_info else None
+        if depth_dial_manager and session_id:
+            try:
+                from ..depth_dial.models import DepthLevel as DDLevel
 
-        return []
+                await depth_dial_manager.change_depth_dial(
+                    session_id=session_id,
+                    new_level=DDLevel(payload.newLevel.value),
+                )
+            except Exception as exc:
+                logger.warning("DepthDialManager update failed: %s", exc)
+
+        return [
+            ServerMessage(
+                type="status",
+                payload={
+                    "event": "depth_dial_changed",
+                    "newLevel": payload.newLevel.value,
+                    "previousLevel": old_level,
+                    "message": (
+                        f"Depth dial changed to {payload.newLevel.value}. "
+                        "Subsequent content will be adapted."
+                    ),
+                    "timestamp": int(time.time() * 1000),
+                },
+            )
+        ]
 
     async def _handle_chronicle_export(
         self, client_id: str, message: ClientMessage

@@ -47,6 +47,8 @@ class ConnectionManager:
         self._buffers: Dict[str, MessageBuffer] = {}
         # Per-client BranchDocumentaryManager instances (Task 23)
         self._branch_managers: Dict[str, "Any"] = {}
+        # Per-client DepthDialManager instances (Task 24)
+        self._depth_dial_managers: Dict[str, "Any"] = {}
         # Background heartbeat tasks
         self._heartbeat_tasks: Dict[str, asyncio.Task] = {}
         self._lock = asyncio.Lock()
@@ -209,6 +211,14 @@ class ConnectionManager:
         """Return the BranchDocumentaryManager for a client, or None."""
         return self._branch_managers.get(client_id)
 
+    def set_depth_dial_manager(self, client_id: str, manager: "Any") -> None:
+        """Attach a DepthDialManager to a client connection (Task 24)."""
+        self._depth_dial_managers[client_id] = manager
+
+    def get_depth_dial_manager(self, client_id: str) -> "Optional[Any]":
+        """Return the DepthDialManager for a client, or None."""
+        return self._depth_dial_managers.get(client_id)
+
     def active_count(self) -> int:
         """Return the number of live WebSocket connections."""
         return len(self._connections)
@@ -230,6 +240,7 @@ class ConnectionManager:
             self._buffers.pop(cid, None)
             self._info.pop(cid, None)
             self._branch_managers.pop(cid, None)
+            self._depth_dial_managers.pop(cid, None)
 
         if stale:
             logger.debug("Evicted %d stale client records", len(stale))

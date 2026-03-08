@@ -94,6 +94,10 @@ class DocumentaryOrchestrator:
         LoreModeHandler instance (Task 21).  When provided, the
         ``lore_mode_workflow`` uses full multimodal fusion.  When absent,
         falls back to the basic topic fusion.
+    depth_dial_manager:
+        DepthDialManager instance (Task 24).  When provided, narration
+        prompt instructions are enriched with depth-level guidance so
+        generated content matches the requested complexity (Req 14.2–14.4).
     on_stream_element:
         Optional async callback invoked for each content element as it is
         produced.  Signature: ``async (session_id, element) -> None``.
@@ -113,6 +117,7 @@ class DocumentaryOrchestrator:
         lore_mode_handler: Any = None,
         alternate_history_engine: Any = None,
         branch_documentary_manager: Any = None,
+        depth_dial_manager: Any = None,
         on_stream_element: Optional[
             Callable[[str, ContentElement], Any]
         ] = None,
@@ -127,6 +132,7 @@ class DocumentaryOrchestrator:
         self._lore_mode_handler = lore_mode_handler
         self._alternate_history = alternate_history_engine
         self._branch_manager = branch_documentary_manager
+        self._depth_dial = depth_dial_manager
         self._on_stream_element = on_stream_element
         self._assembler = StreamAssembler()
         self._failures: list[TaskFailure] = []
@@ -822,6 +828,22 @@ class DocumentaryOrchestrator:
             "expert": DepthLevel.EXPERT,
         }
 
+        # Enrich custom_instructions with depth-dial guidance (Req 14.2–14.4)
+        custom_instructions = kwargs.get("custom_instructions") or ""
+        depth_dial_str = kwargs.get("depth_dial", "explorer")
+        if self._depth_dial:
+            try:
+                from ..depth_dial.models import DepthLevel as DDLevel
+
+                dd_level = DDLevel(depth_dial_str)
+                depth_instructions = self._depth_dial.build_narration_instructions(dd_level)
+                if custom_instructions:
+                    custom_instructions = f"{depth_instructions}\n\n{custom_instructions}"
+                else:
+                    custom_instructions = depth_instructions
+            except Exception:
+                logger.warning("Failed to build depth dial instructions — continuing without")
+
         context = NarrationContext(
             mode=kwargs.get("mode", "sight"),
             topic=kwargs.get("topic"),
@@ -832,11 +854,11 @@ class DocumentaryOrchestrator:
             latitude=kwargs.get("latitude", 0.0),
             longitude=kwargs.get("longitude", 0.0),
             language=kwargs.get("language", "en"),
-            depth_level=depth_map.get(kwargs.get("depth_dial", "explorer"), DepthLevel.EXPLORER),
+            depth_level=depth_map.get(depth_dial_str, DepthLevel.EXPLORER),
             session_id=kwargs.get("session_id"),
             user_id=kwargs.get("user_id"),
             previous_topics=kwargs.get("previous_topics", []),
-            custom_instructions=kwargs.get("custom_instructions"),
+            custom_instructions=custom_instructions or None,
         )
 
         script = await self._narration.generate_script(context)
