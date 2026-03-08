@@ -1,0 +1,11 @@
+# LORE Narration Engine dependencies
+# Python 3.11+
+
+# Data validation
+pydantic==2.12.5
+
+# Gemini SDK (Live API + text generation)
+google-genai==1.66.0
+
+# Google Cloud Logging
+google-cloud-logging==3.14.0
