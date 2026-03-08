@@ -51,6 +51,8 @@ class ConnectionManager:
         self._depth_dial_managers: Dict[str, "Any"] = {}
         # Per-client HistoricalCharacterManager instances (Task 25)
         self._historical_character_managers: Dict[str, "Any"] = {}
+        # Per-client ModeSwitchManager instances (Task 26)
+        self._mode_switch_managers: Dict[str, "Any"] = {}
         # Background heartbeat tasks
         self._heartbeat_tasks: Dict[str, asyncio.Task] = {}
         self._lock = asyncio.Lock()
@@ -229,6 +231,14 @@ class ConnectionManager:
         """Return the HistoricalCharacterManager for a client, or None."""
         return self._historical_character_managers.get(client_id)
 
+    def set_mode_switch_manager(self, client_id: str, manager: "Any") -> None:
+        """Attach a ModeSwitchManager to a client connection (Task 26)."""
+        self._mode_switch_managers[client_id] = manager
+
+    def get_mode_switch_manager(self, client_id: str) -> "Optional[Any]":
+        """Return the ModeSwitchManager for a client, or None."""
+        return self._mode_switch_managers.get(client_id)
+
     def active_count(self) -> int:
         """Return the number of live WebSocket connections."""
         return len(self._connections)
@@ -252,6 +262,7 @@ class ConnectionManager:
             self._branch_managers.pop(cid, None)
             self._depth_dial_managers.pop(cid, None)
             self._historical_character_managers.pop(cid, None)
+            self._mode_switch_managers.pop(cid, None)
 
         if stale:
             logger.debug("Evicted %d stale client records", len(stale))

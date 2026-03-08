@@ -125,6 +125,7 @@ class DocumentaryOrchestrator:
         branch_documentary_manager: Any = None,
         depth_dial_manager: Any = None,
         historical_character_manager: Any = None,
+        mode_switch_manager: Any = None,
         on_stream_element: Optional[
             Callable[[str, ContentElement], Any]
         ] = None,
@@ -141,6 +142,7 @@ class DocumentaryOrchestrator:
         self._branch_manager = branch_documentary_manager
         self._depth_dial = depth_dial_manager
         self._historical_character = historical_character_manager
+        self._mode_switch = mode_switch_manager
         self._on_stream_element = on_stream_element
         self._assembler = StreamAssembler()
         self._failures: list[TaskFailure] = []
@@ -771,6 +773,65 @@ class DocumentaryOrchestrator:
         """
         logger.info("Mode transition: %s → %s", from_mode.value, to_mode.value)
         return True
+
+    async def switch_mode(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        from_mode: Mode,
+        to_mode: Mode,
+        depth_dial: str = "explorer",
+        language: str = "en",
+    ) -> DocumentaryStream:
+        """Switch operating mode with content preservation (Req 1.6, 1.7).
+
+        Delegates to the ModeSwitchManager if available, then returns
+        a stream with a transition element confirming the switch.
+        """
+        if not self.validate_mode_transition(from_mode, to_mode):
+            from .models import ModeTransitionError
+            raise ModeTransitionError(
+                f"Invalid transition: {from_mode.value} → {to_mode.value}"
+            )
+
+        transition_text = f"Switching from {from_mode.value} to {to_mode.value}"
+
+        if self._mode_switch is not None:
+            try:
+                from ..mode_switch.models import SwitchableMode
+
+                result = await self._mode_switch.switch_mode(
+                    session_id=session_id,
+                    user_id=user_id,
+                    from_mode=SwitchableMode(from_mode.value),
+                    to_mode=SwitchableMode(to_mode.value),
+                    depth_dial=depth_dial,
+                    language=language,
+                )
+                transition_text = result.transition_message or transition_text
+            except Exception as exc:
+                logger.warning("ModeSwitchManager failed: %s", exc)
+
+        transition = ContentElement(
+            type=ContentElementType.TRANSITION,
+            transition_text=transition_text,
+        )
+
+        stream = DocumentaryStream(
+            session_id=session_id,
+            mode=to_mode,
+            elements=[transition],
+            completed_at=time.time(),
+        )
+
+        if self._on_stream_element:
+            try:
+                await self._on_stream_element(session_id, transition)
+            except Exception:
+                pass
+
+        return stream
 
     # ── Parallel generation ──────────────────────────────────────────────────
 

@@ -101,10 +101,17 @@ class CharacterInteractionPayload(BaseModel):
     timestamp: int = 0
 
 
+class ModeSwitchPayload(BaseModel):
+    """Payload for switching modes during an active session (Req 1.6)."""
+    targetMode: OperatingMode
+    timestamp: int = 0
+
+
 # ── Validated incoming message wrapper ────────────────────────────────────────
 
 CLIENT_MESSAGE_TYPES = Literal[
     "mode_select",
+    "mode_switch",
     "camera_frame",
     "voice_input",
     "gps_update",

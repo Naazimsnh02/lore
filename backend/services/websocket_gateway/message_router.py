@@ -27,6 +27,7 @@ from .models import (
     ErrorPayload,
     GPSUpdatePayload,
     ModeSelectPayload,
+    ModeSwitchPayload,
     QueryPayload,
     ServerMessage,
     StatusPayload,
@@ -53,6 +54,7 @@ class MessageRouter:
 
         self._handlers = {
             "mode_select": self._handle_mode_select,
+            "mode_switch": self._handle_mode_switch,
             "camera_frame": self._handle_camera_frame,
             "voice_input": self._handle_voice_input,
             "gps_update": self._handle_gps_update,
@@ -122,6 +124,101 @@ class MessageRouter:
                 ).model_dump(),
             )
         ]
+
+    async def _handle_mode_switch(
+        self, client_id: str, message: ClientMessage
+    ) -> list[ServerMessage]:
+        """Switch mode during an active session with content preservation (Req 1.6, 1.7).
+
+        Delegates to the ModeSwitchManager attached to the client connection.
+        Updates connection metadata and returns a status message with the
+        preserved content snapshot.
+        """
+        payload = ModeSwitchPayload(**message.payload)
+        conn_info = self._cm.get_connection_info(client_id)
+
+        current_mode = conn_info.mode if conn_info else None
+        if current_mode is None:
+            return [
+                self._error(
+                    "NO_ACTIVE_MODE",
+                    "No active mode set. Use mode_select first.",
+                )
+            ]
+
+        if current_mode.value == payload.targetMode.value:
+            return [
+                ServerMessage(
+                    type="status",
+                    payload={
+                        "event": "mode_switch_noop",
+                        "currentMode": current_mode.value,
+                        "message": f"Already in {current_mode.value} mode.",
+                        "timestamp": int(time.time() * 1000),
+                    },
+                )
+            ]
+
+        mode_switch_manager = self._cm.get_mode_switch_manager(client_id)
+        if mode_switch_manager is None:
+            # Fallback: just update the mode without content preservation tracking
+            self._cm.update_mode(client_id, payload.targetMode)
+            logger.info(
+                "Client %s mode switch %s → %s (no manager, fallback)",
+                client_id,
+                current_mode.value,
+                payload.targetMode.value,
+            )
+            return [
+                ServerMessage(
+                    type="status",
+                    payload={
+                        "event": "mode_switched",
+                        "fromMode": current_mode.value,
+                        "toMode": payload.targetMode.value,
+                        "preserved": {},
+                        "timestamp": int(time.time() * 1000),
+                    },
+                )
+            ]
+
+        session_id = conn_info.session_id if conn_info else client_id
+        user_id = conn_info.user_id if conn_info else ""
+
+        try:
+            from ..mode_switch.models import SwitchableMode
+
+            result = await mode_switch_manager.switch_mode(
+                session_id=session_id,
+                user_id=user_id,
+                from_mode=SwitchableMode(current_mode.value),
+                to_mode=SwitchableMode(payload.targetMode.value),
+                depth_dial=conn_info.depth_dial.value if conn_info else "explorer",
+                language=conn_info.language if conn_info else "en",
+            )
+
+            # Update connection metadata to reflect the new mode
+            self._cm.update_mode(client_id, payload.targetMode)
+
+            return [
+                ServerMessage(
+                    type="status",
+                    payload={
+                        "event": "mode_switched",
+                        "switchId": result.switch_id,
+                        "fromMode": result.from_mode.value,
+                        "toMode": result.to_mode.value,
+                        "preserved": result.preserved.model_dump(),
+                        "transitionMessage": result.transition_message,
+                        "timestamp": int(time.time() * 1000),
+                    },
+                )
+            ]
+        except Exception as exc:
+            logger.exception(
+                "Mode switch failed for client %s: %s", client_id, exc
+            )
+            return [self._error("MODE_SWITCH_ERROR", f"Mode switch failed: {exc}")]
 
     async def _handle_camera_frame(
         self, client_id: str, message: ClientMessage
