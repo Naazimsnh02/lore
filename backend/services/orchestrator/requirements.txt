@@ -1,0 +1,5 @@
+# Orchestrator service dependencies
+pydantic==2.12.5
+google-adk>=0.3.0
+google-genai>=1.66.0
+google-cloud-logging>=3.14.0
