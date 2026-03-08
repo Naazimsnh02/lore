@@ -1,0 +1,65 @@
+name: lore_documentary
+description: "LORE - The World Is Your Documentary. A multimodal AI documentary app."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.10.8
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # UI
+  cupertino_icons: ^1.0.8
+
+  # State management
+  flutter_riverpod: ^3.1.0
+  riverpod_annotation: ^4.0.0
+
+  # Camera
+  camera: ^0.12.0
+
+  # Microphone / audio recording
+  record: ^6.2.0
+
+  # Audio playback
+  just_audio: ^0.10.5
+
+  # GPS / location
+  geolocator: ^14.0.2
+
+  # WebSocket
+  web_socket_channel: ^3.0.2
+
+  # Permissions
+  permission_handler: ^12.0.1
+
+  # Firebase Auth (anonymous auth)
+  firebase_core: ^4.5.0
+  firebase_auth: ^6.2.0
+
+  # HTTP
+  http: ^1.2.2
+
+  # Utilities
+  uuid: ^4.5.1
+  shared_preferences: ^2.3.5
+  path_provider: ^2.1.5
+  intl: ^0.20.2
+  logging: ^1.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  riverpod_generator: ^4.0.0+1
+  build_runner: ^2.4.14
+  mockito: ^5.4.5
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/

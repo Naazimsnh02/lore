@@ -16,7 +16,7 @@ Implementation follows a spec-driven development methodology with property-based
 ## Repository Structure
 
 ```
-lore-documentary-app/
+lore/
 ├── backend/
 │   ├── services/
 │   │   ├── orchestrator/          # ADK-based multi-agent coordinator
