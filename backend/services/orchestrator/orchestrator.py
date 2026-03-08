@@ -112,6 +112,7 @@ class DocumentaryOrchestrator:
         session_memory: Any = None,
         lore_mode_handler: Any = None,
         alternate_history_engine: Any = None,
+        branch_documentary_manager: Any = None,
         on_stream_element: Optional[
             Callable[[str, ContentElement], Any]
         ] = None,
@@ -125,6 +126,7 @@ class DocumentaryOrchestrator:
         self._session_memory = session_memory
         self._lore_mode_handler = lore_mode_handler
         self._alternate_history = alternate_history_engine
+        self._branch_manager = branch_documentary_manager
         self._on_stream_element = on_stream_element
         self._assembler = StreamAssembler()
         self._failures: list[TaskFailure] = []
@@ -524,10 +526,18 @@ class DocumentaryOrchestrator:
         """Branch documentary: sub-topic exploration up to 3 levels deep.
 
         Requirement 13.1 — nested sub-topics, max depth 3.
+
+        When a BranchDocumentaryManager is available, delegates depth tracking
+        and session memory persistence to it (Task 23).  Otherwise falls back
+        to the original heuristic using ``previous_topics`` length.
         """
         branch_topic = request.branch_topic or request.voice_topic or "Unknown"
-        # Depth tracking via previous_topics length (simple heuristic)
+
+        # Depth tracking — prefer BranchDocumentaryManager when available
         current_depth = len(request.previous_topics)
+        if self._branch_manager is not None:
+            current_depth = self._branch_manager.current_depth
+
         if current_depth >= MAX_BRANCH_DEPTH:
             logger.warning(
                 "Branch depth %d exceeds max %d — returning transition",
@@ -544,6 +554,34 @@ class DocumentaryOrchestrator:
                 mode=request.mode,
                 transition_elements=[transition],
             )
+
+        # Persist branch node via manager if available (Req 13.6)
+        if self._branch_manager is not None:
+            try:
+                from ..branch_documentary.models import BranchDepthExceeded
+
+                await self._branch_manager.create_branch(
+                    branch_topic,
+                    mode=request.mode.value,
+                    language=request.language,
+                    depth_dial=request.depth_dial,
+                )
+            except BranchDepthExceeded:
+                transition = self._assembler.create_transition_element(
+                    f"Maximum exploration depth reached for '{branch_topic}'. "
+                    f"Returning to the main documentary."
+                )
+                return self._assembler.assemble(
+                    request_id=request.request_id,
+                    session_id=request.session_id,
+                    mode=request.mode,
+                    transition_elements=[transition],
+                )
+            except Exception:
+                logger.exception(
+                    "BranchDocumentaryManager error for '%s' — continuing with generation",
+                    branch_topic,
+                )
 
         narration_elements, illustration_elements, fact_elements = (
             await self._parallel_generate(

@@ -237,7 +237,10 @@ class MessageRouter:
     ) -> list[ServerMessage]:
         """Create a branch documentary from the current context.
 
-        Delegated to BranchDocumentaryManager (Task 23).
+        Delegates to BranchDocumentaryManager (Task 23).  The manager
+        handles depth enforcement, stack management, session memory
+        persistence, and optionally triggers content generation via
+        the Orchestrator.  Documentary content is pushed asynchronously.
         """
         payload = BranchRequestPayload(**message.payload)
         logger.info(
@@ -247,9 +250,46 @@ class MessageRouter:
             payload.parentBranchId,
         )
 
-        # TODO(Task-23): forward to BranchDocumentaryManager.create_branch(client_id, payload)
+        branch_manager = self._cm.get_branch_manager(client_id)
+        if branch_manager is None:
+            return [
+                self._error(
+                    "BRANCH_NOT_AVAILABLE",
+                    "Branch documentary manager not initialised for this session",
+                )
+            ]
 
-        return []
+        try:
+            result = await branch_manager.create_branch(
+                payload.topic,
+                stream_position=payload.timestamp / 1000.0,
+            )
+            return [
+                ServerMessage(
+                    type="status",
+                    payload={
+                        "event": "branch_created",
+                        "branchId": result.branch_id,
+                        "topic": result.context.topic,
+                        "depth": result.context.depth,
+                        "parentBranchId": result.context.parent_branch_id,
+                        "timestamp": int(time.time() * 1000),
+                    },
+                )
+            ]
+        except Exception as exc:
+            exc_name = type(exc).__name__
+            if exc_name == "BranchDepthExceeded":
+                return [
+                    self._error(
+                        "BRANCH_DEPTH_EXCEEDED",
+                        str(exc),
+                    )
+                ]
+            logger.exception(
+                "Branch creation failed for client %s: %s", client_id, exc
+            )
+            return [self._error("BRANCH_ERROR", "Failed to create branch documentary")]
 
     async def _handle_depth_dial_change(
         self, client_id: str, message: ClientMessage
