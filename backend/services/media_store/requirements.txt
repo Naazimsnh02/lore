@@ -1,0 +1,14 @@
+# LORE Media Store Manager dependencies
+# Python 3.11+
+
+# Data validation
+pydantic==2.12.5
+
+# Google Cloud Storage
+google-cloud-storage==2.20.0
+
+# Google Cloud Firestore (for metadata and quota records)
+google-cloud-firestore==2.24.0
+
+# Structured logging for Cloud Logging
+google-cloud-logging==3.14.0
