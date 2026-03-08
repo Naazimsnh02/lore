@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/models.dart';
+import '../services/audio_playback_service.dart';
 import '../services/auth_service.dart';
 import '../services/camera_service.dart';
 import '../services/gps_service.dart';
@@ -27,6 +28,9 @@ final gpsServiceProvider = Provider<GpsService>((_) => GpsService());
 
 final webSocketServiceProvider =
     Provider<WebSocketService>((_) => WebSocketService());
+
+final audioPlaybackServiceProvider =
+    Provider<AudioPlaybackService>((_) => AudioPlaybackService());
 
 // ── Preferences ──────────────────────────────────────────────────────────────
 
@@ -60,6 +64,28 @@ class SessionNotifier extends StateNotifier<SessionState> {
   void clearStream() => state = state.copyWith(streamElements: []);
 
   void setSessionId(String id) => state = state.copyWith(sessionId: id);
+
+  // ── Conversation management ────────────────────────────────────────────
+
+  /// Add a message to the conversation history.
+  void addConversationMessage(ConversationMessage message) {
+    state = state.copyWith(
+      conversationHistory: [...state.conversationHistory, message],
+    );
+  }
+
+  /// Clear the conversation history (e.g. on session reset).
+  void clearConversation() => state = state.copyWith(
+        conversationHistory: [],
+        branchDepth: 0,
+      );
+
+  /// Update whether narration audio is currently playing.
+  void setNarrationPlaying(bool playing) =>
+      state = state.copyWith(isNarrationPlaying: playing);
+
+  /// Update the current branch depth.
+  void setBranchDepth(int depth) => state = state.copyWith(branchDepth: depth);
 }
 
 final sessionProvider =

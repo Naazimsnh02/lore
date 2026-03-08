@@ -280,6 +280,55 @@ class ServerError {
   }
 }
 
+// ─── Conversation models ─────────────────────────────────────────────────────
+
+/// Role of a participant in a conversation turn.
+enum ConversationRole { user, assistant }
+
+/// A single message in the VoiceMode conversation history.
+class ConversationMessage {
+  final String id;
+  final ConversationRole role;
+  final String text;
+  final DateTime timestamp;
+  final String? topic;
+  final int branchDepth;
+
+  const ConversationMessage({
+    required this.id,
+    required this.role,
+    required this.text,
+    required this.timestamp,
+    this.topic,
+    this.branchDepth = 0,
+  });
+
+  factory ConversationMessage.fromJson(Map<String, dynamic> json) {
+    return ConversationMessage(
+      id: json['id'] as String? ?? '',
+      role: ConversationRole.values.firstWhere(
+        (e) => e.name == json['role'],
+        orElse: () => ConversationRole.assistant,
+      ),
+      text: json['text'] as String? ?? '',
+      timestamp: json['timestamp'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(json['timestamp'] as int)
+          : DateTime.now(),
+      topic: json['topic'] as String?,
+      branchDepth: json['branchDepth'] as int? ?? 0,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'role': role.name,
+        'text': text,
+        'timestamp': timestamp.millisecondsSinceEpoch,
+        if (topic != null) 'topic': topic,
+        'branchDepth': branchDepth,
+      };
+}
+
 // ─── App state models ────────────────────────────────────────────────────────
 
 /// The overall app session state.
@@ -291,6 +340,9 @@ class SessionState {
   final List<DocumentaryStreamElement> streamElements;
   final bool isConnected;
   final String? errorMessage;
+  final List<ConversationMessage> conversationHistory;
+  final bool isNarrationPlaying;
+  final int branchDepth;
 
   const SessionState({
     this.sessionId,
@@ -300,6 +352,9 @@ class SessionState {
     this.streamElements = const [],
     this.isConnected = false,
     this.errorMessage,
+    this.conversationHistory = const [],
+    this.isNarrationPlaying = false,
+    this.branchDepth = 0,
   });
 
   SessionState copyWith({
@@ -310,6 +365,9 @@ class SessionState {
     List<DocumentaryStreamElement>? streamElements,
     bool? isConnected,
     String? errorMessage,
+    List<ConversationMessage>? conversationHistory,
+    bool? isNarrationPlaying,
+    int? branchDepth,
   }) {
     return SessionState(
       sessionId: sessionId ?? this.sessionId,
@@ -319,6 +377,9 @@ class SessionState {
       streamElements: streamElements ?? this.streamElements,
       isConnected: isConnected ?? this.isConnected,
       errorMessage: errorMessage,
+      conversationHistory: conversationHistory ?? this.conversationHistory,
+      isNarrationPlaying: isNarrationPlaying ?? this.isNarrationPlaying,
+      branchDepth: branchDepth ?? this.branchDepth,
     );
   }
 }

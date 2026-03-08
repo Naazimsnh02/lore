@@ -6,6 +6,7 @@ Requirements: 3.1, 3.2, 5.2, 11.1–11.6.
 
 from .affective_narrator import AffectiveNarrator
 from .engine import NarrationEngine
+from .ghost_guide import GhostGuide
 from .models import (
     AudioChunk,
     DepthLevel,
@@ -19,6 +20,7 @@ from .models import (
 
 __all__ = [
     "AffectiveNarrator",
+    "GhostGuide",
     "NarrationEngine",
     "AudioChunk",
     "DepthLevel",

@@ -22,6 +22,8 @@ The DocumentaryOrchestrator coordinates all generation services:
   - NanoIllustrator   → illustrations (Task 10)
   - SearchGrounder    → fact verification (Task 11)
   - SightModeHandler  → camera frame processing (Task 8)
+  - VoiceModeHandler  → voice transcription + topic parsing (Task 15)
+  - ConversationManager → intent classification + context (Task 16)
   - SessionMemoryManager → persistence (Task 3)
 
 Parallel execution: narration, illustration, and search verification run
@@ -30,7 +32,7 @@ concurrently via ``asyncio.gather`` (Req 21.2).  Each task is wrapped in
 
 Mode workflows:
   - sight_mode_workflow: frame → location → parallel(narration, illustration, search)
-  - voice_mode_workflow: topic → parallel(narration, illustration, search)
+  - voice_mode_workflow: audio/topic → transcribe → classify intent → route → parallel generation
   - lore_mode_workflow: frame + topic → fusion → parallel generation
   - branch_documentary_workflow: sub-topic → parallel generation (depth ≤ 3)
   - alternate_history_workflow: topic + context → speculative narration
@@ -82,6 +84,10 @@ class DocumentaryOrchestrator:
         SearchGrounder instance (Task 11).
     sight_mode_handler:
         SightModeHandler instance (Task 8).
+    voice_mode_handler:
+        VoiceModeHandler instance (Task 15).
+    conversation_manager:
+        ConversationManager instance (Task 16).
     session_memory:
         SessionMemoryManager instance (Task 3).
     on_stream_element:
@@ -97,6 +103,8 @@ class DocumentaryOrchestrator:
         nano_illustrator: Any = None,
         search_grounder: Any = None,
         sight_mode_handler: Any = None,
+        voice_mode_handler: Any = None,
+        conversation_manager: Any = None,
         session_memory: Any = None,
         on_stream_element: Optional[
             Callable[[str, ContentElement], Any]
@@ -106,6 +114,8 @@ class DocumentaryOrchestrator:
         self._illustrator = nano_illustrator
         self._grounder = search_grounder
         self._sight_mode = sight_mode_handler
+        self._voice_mode = voice_mode_handler
+        self._conversation_manager = conversation_manager
         self._session_memory = session_memory
         self._on_stream_element = on_stream_element
         self._assembler = StreamAssembler()
@@ -223,28 +233,136 @@ class DocumentaryOrchestrator:
     async def voice_mode_workflow(
         self, request: DocumentaryRequest
     ) -> DocumentaryStream:
-        """VoiceMode: voice topic → parallel content generation.
+        """VoiceMode: voice audio/topic → transcribe → classify → generate.
 
-        Steps:
-          1. Use the transcribed topic from the request
-          2. Run narration, illustration, and search in parallel
-          3. Assemble interleaved stream
+        Enhanced pipeline (Task 17):
+          1. If ``voice_audio`` is present and VoiceModeHandler is available,
+             transcribe the audio to obtain the topic.
+          2. If ConversationManager is available, classify the user intent
+             (new_topic / follow_up / branch / question / command).
+          3. Route based on intent:
+             - BRANCH  → delegate to ``branch_documentary_workflow``
+             - COMMAND → return a command-acknowledgement stream
+             - NEW_TOPIC / FOLLOW_UP / QUESTION → parallel content generation
+          4. Record conversation turn for context awareness.
+
+        Falls back to simple topic-based generation when VoiceModeHandler or
+        ConversationManager are not configured (backward compatible).
+
+        Requirements: 3.1, 3.2, 3.3, 5.1.
         """
-        topic = request.voice_topic or "Unknown Topic"
+        topic = request.voice_topic or ""
+        language = request.language
+        intent_info: Optional[Any] = None
 
+        # ── Step 1: Transcribe raw audio if available ─────────────────────
+        if request.voice_audio and self._voice_mode:
+            try:
+                from ..voice_mode.models import VoiceModeEvent
+
+                voice_response = await self._voice_mode.process_voice_input(
+                    audio_base64=request.voice_audio,
+                    sample_rate=16000,
+                    timestamp=request.timestamp,
+                    session_id=request.session_id,
+                    user_id=request.user_id,
+                    previous_topics=request.previous_topics,
+                )
+
+                if voice_response.event == VoiceModeEvent.TOPIC_DETECTED:
+                    topic = voice_response.topic or topic
+                    language = voice_response.detected_language or language
+                elif voice_response.event == VoiceModeEvent.SILENCE_DETECTED:
+                    logger.info("Voice input was silence — using fallback topic")
+                elif voice_response.event == VoiceModeEvent.ERROR:
+                    logger.warning(
+                        "Voice processing error: %s",
+                        voice_response.payload.get("error", "unknown"),
+                    )
+                # For INPUT_BUFFERED, keep existing topic
+            except Exception:
+                logger.exception("VoiceModeHandler failed — falling back to request topic")
+
+        # Use fallback topic if still empty
+        if not topic:
+            topic = "Unknown Topic"
+
+        # ── Step 2: Classify intent via ConversationManager ───────────────
+        if self._conversation_manager:
+            try:
+                from ..voice_mode.models import VoiceModeContext
+
+                voice_ctx = VoiceModeContext(
+                    topic=topic,
+                    original_query=topic,
+                    language=language,
+                    session_id=request.session_id,
+                    user_id=request.user_id,
+                    previous_topics=request.previous_topics,
+                )
+
+                intent_info = await self._conversation_manager.handle_input(voice_ctx)
+                logger.info(
+                    "Intent classified: %s (confidence=%.2f) for topic '%s'",
+                    intent_info.intent.value,
+                    intent_info.confidence,
+                    topic,
+                )
+            except Exception:
+                logger.exception("ConversationManager failed — treating as new topic")
+
+        # ── Step 3: Route based on intent ─────────────────────────────────
+        if intent_info is not None:
+            from ..voice_mode.models import ConversationIntent
+
+            if intent_info.intent == ConversationIntent.BRANCH:
+                branch_topic = intent_info.branch_topic or topic
+                branch_request = request.model_copy(
+                    update={
+                        "branch_topic": branch_topic,
+                        "previous_topics": request.previous_topics + [topic],
+                    }
+                )
+                stream = await self.branch_documentary_workflow(branch_request)
+                # Record assistant turn
+                self._record_assistant_turn(stream, topic)
+                return stream
+
+            if intent_info.intent == ConversationIntent.COMMAND:
+                command_text = self._handle_voice_command(topic)
+                transition = self._assembler.create_transition_element(command_text)
+                stream = self._assembler.assemble(
+                    request_id=request.request_id,
+                    session_id=request.session_id,
+                    mode=Mode.VOICE,
+                    transition_elements=[transition],
+                )
+                self._record_assistant_turn(stream, topic)
+                return stream
+
+            # For FOLLOW_UP, use context summary to enrich the topic
+            if intent_info.intent == ConversationIntent.FOLLOW_UP:
+                if self._conversation_manager:
+                    context_summary = self._conversation_manager.get_context_summary()
+                    if context_summary:
+                        current_topic = self._conversation_manager.get_current_topic()
+                        if current_topic and current_topic != topic:
+                            topic = f"{topic} (in the context of {current_topic})"
+
+        # ── Step 4: Parallel content generation ───────────────────────────
         narration_elements, illustration_elements, fact_elements = (
             await self._parallel_generate(
                 mode="voice",
                 topic=topic,
                 depth_dial=request.depth_dial,
-                language=request.language,
+                language=language,
                 session_id=request.session_id,
                 user_id=request.user_id,
                 previous_topics=request.previous_topics,
             )
         )
 
-        return self._assembler.assemble(
+        stream = self._assembler.assemble(
             request_id=request.request_id,
             session_id=request.session_id,
             mode=Mode.VOICE,
@@ -252,6 +370,11 @@ class DocumentaryOrchestrator:
             illustration_elements=illustration_elements,
             fact_elements=fact_elements,
         )
+
+        # ── Step 5: Record conversation turn ──────────────────────────────
+        self._record_assistant_turn(stream, topic)
+
+        return stream
 
     async def lore_mode_workflow(
         self, request: DocumentaryRequest
@@ -823,6 +946,49 @@ class DocumentaryOrchestrator:
         if topic and topic != place_name:
             claims.append(topic)
         return claims
+
+    def _handle_voice_command(self, command_text: str) -> str:
+        """Map a voice command to a human-readable acknowledgement.
+
+        Recognised commands include stop, pause, resume, mode/language/depth
+        changes, branch exit, and export.  Returns a user-facing string.
+        """
+        lower = command_text.lower().strip()
+
+        if "stop" in lower or "pause" in lower:
+            return "Documentary paused. Say 'resume' to continue."
+        if "resume" in lower:
+            return "Resuming documentary."
+        if "switch mode" in lower or "change mode" in lower:
+            return "Mode switch requested. Please select a new mode."
+        if "change language" in lower or "switch language" in lower:
+            return "Language change requested. Please specify the desired language."
+        if "change depth" in lower or "set depth" in lower:
+            return "Depth level change requested. Choose Explorer, Scholar, or Expert."
+        if "go back" in lower or "exit branch" in lower or "close branch" in lower or "return to" in lower:
+            return "Returning to the previous topic."
+        if "export" in lower or "save" in lower:
+            return "Exporting your documentary chronicle."
+
+        return f"Command acknowledged: {command_text}"
+
+    def _record_assistant_turn(
+        self, stream: DocumentaryStream, topic: str
+    ) -> None:
+        """Record the generated stream as an assistant turn in ConversationManager."""
+        if not self._conversation_manager:
+            return
+        try:
+            # Build a summary from narration elements
+            narration_texts = [
+                e.narration_text
+                for e in stream.elements
+                if e.type == ContentElementType.NARRATION and e.narration_text
+            ]
+            summary = " ".join(narration_texts) if narration_texts else f"Documentary about {topic}"
+            self._conversation_manager.add_assistant_turn(summary, topic=topic)
+        except Exception:
+            logger.warning("Failed to record assistant turn in ConversationManager")
 
     def _empty_stream(
         self, request: DocumentaryRequest, error: str = ""
