@@ -1,0 +1,5 @@
+# Nano Illustrator service dependencies
+# Design reference: LORE design.md §5
+google-genai>=1.66.0
+google-cloud-storage>=3.9.0
+pydantic>=2.12.0
