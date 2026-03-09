@@ -280,6 +280,31 @@ class ServerError {
   }
 }
 
+/// Directions information from backend.
+class DirectionsResponse {
+  final double distanceMeters;
+  final double durationSeconds;
+  final String polyline;
+  final List<Map<String, dynamic>> steps;
+
+  const DirectionsResponse({
+    required this.distanceMeters,
+    required this.durationSeconds,
+    required this.polyline,
+    required this.steps,
+  });
+
+  factory DirectionsResponse.fromJson(Map<String, dynamic> json) {
+    final payload = json['payload'] as Map<String, dynamic>;
+    return DirectionsResponse(
+      distanceMeters: (payload['distanceMeters'] as num).toDouble(),
+      durationSeconds: (payload['durationSeconds'] as num).toDouble(),
+      polyline: payload['polyline'] as String? ?? '',
+      steps: (payload['steps'] as List?)?.cast<Map<String, dynamic>>() ?? [],
+    );
+  }
+}
+
 // ─── Conversation models ─────────────────────────────────────────────────────
 
 /// Role of a participant in a conversation turn.

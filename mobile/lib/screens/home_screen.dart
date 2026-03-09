@@ -11,6 +11,7 @@ import '../providers/app_providers.dart';
 import 'sight_mode_screen.dart';
 import 'voice_mode_screen.dart';
 import 'lore_mode_screen.dart';
+import 'gps_walking_tour_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -60,6 +61,14 @@ class HomeScreen extends ConsumerWidget {
                       gradient: const [Color(0xFF4A148C), Color(0xFF6A1B9A)],
                       onTap: () => _enterMode(context, ref, LoreMode.lore),
                     ),
+                    const SizedBox(height: 16),
+                    _ModeCard(
+                      title: 'GPS Walking Tour',
+                      subtitle: 'Auto-discover landmarks as you walk',
+                      icon: Icons.map_outlined,
+                      gradient: const [Color(0xFFBF360C), Color(0xFFD84315)],
+                      onTap: () => _enterGpsWalkingTour(context, ref),
+                    ),
                   ],
                 ),
               ),
@@ -86,6 +95,17 @@ class HomeScreen extends ConsumerWidget {
       LoreMode.lore => const LoreModeScreen(),
     };
     Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+  }
+
+  void _enterGpsWalkingTour(BuildContext context, WidgetRef ref) {
+    // GPS Walking Tour can work in SightMode or LoreMode
+    ref.read(sessionProvider.notifier).setMode(LoreMode.sight);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const GpsWalkingTourScreen(mode: LoreMode.sight),
+      ),
+    );
   }
 }
 

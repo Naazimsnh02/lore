@@ -36,6 +36,11 @@ class WsLandmarkDetectedEvent extends WsEvent {
   WsLandmarkDetectedEvent(this.landmark);
 }
 
+class WsDirectionsEvent extends WsEvent {
+  final DirectionsResponse directions;
+  WsDirectionsEvent(this.directions);
+}
+
 class WsErrorEvent extends WsEvent {
   final ServerError error;
   WsErrorEvent(this.error);
@@ -163,6 +168,9 @@ class WebSocketService {
         case 'landmark_detected':
           _eventController
               .add(WsLandmarkDetectedEvent(LandmarkDetected.fromJson(json)));
+        case 'directions':
+          _eventController
+              .add(WsDirectionsEvent(DirectionsResponse.fromJson(json)));
         case 'error':
           _eventController.add(WsErrorEvent(ServerError.fromJson(json)));
         default:
