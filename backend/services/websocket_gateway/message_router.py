@@ -51,6 +51,19 @@ class MessageRouter:
 
     def __init__(self, connection_manager: "ConnectionManager") -> None:
         self._cm = connection_manager
+        self._connection_manager = connection_manager  # Alias for clarity
+        
+        # Initialize BargeInHandler (Task 32)
+        self._barge_in_handler = None
+        try:
+            from ..barge_in.handler import BargeInHandler
+            self._barge_in_handler = BargeInHandler(
+                on_pause_callback=self._on_playback_pause,
+                on_resume_callback=self._on_playback_resume,
+            )
+            logger.info("BargeInHandler initialized successfully")
+        except Exception as e:
+            logger.warning("Failed to initialize BargeInHandler: %s", e)
 
         self._handlers = {
             "mode_select": self._handle_mode_select,
@@ -309,7 +322,20 @@ class MessageRouter:
             },
         )
 
-        # TODO(Task-32): forward to BargeInHandler.process(client_id, payload)
+        # Forward to BargeInHandler for processing (Task 32)
+        if self._barge_in_handler:
+            from ..barge_in.models import Interruption
+            
+            interruption = Interruption(
+                audio_data=payload.audioData,
+                stream_position=payload.streamPosition,
+                client_id=client_id,
+                session_id=self._connection_manager.get_session_id(client_id) or "",
+            )
+            
+            # Process asynchronously - result will be sent via callback
+            import asyncio
+            asyncio.create_task(self._process_barge_in_async(client_id, interruption))
 
         return [ack]
 
@@ -564,3 +590,75 @@ class MessageRouter:
                 degradedFunctionality=degraded or [],
             ).model_dump(),
         )
+
+    # ── Barge-In Handler Integration (Task 32) ────────────────────────────────
+
+    async def _process_barge_in_async(self, client_id: str, interruption: Any) -> None:
+        """Process barge-in interruption asynchronously and send response.
+        
+        This method is called as a background task to process the interjection
+        without blocking the acknowledgment response.
+        """
+        try:
+            result = await self._barge_in_handler.process_interruption(interruption)
+            
+            if result.interjection_response:
+                # Send interjection response to client
+                response_msg = ServerMessage(
+                    type="barge_in_response",
+                    payload={
+                        "type": result.interjection_response.type.value,
+                        "transcription": result.interjection_response.transcription,
+                        "resumeAction": result.interjection_response.resume_action.value,
+                        "resumePosition": result.interjection_response.resume_position,
+                        "confidence": result.interjection_response.confidence,
+                        "branchTopic": result.interjection_response.branch_topic,
+                        "content": result.interjection_response.content,
+                        "processingTimeMs": result.interjection_response.processing_time_ms,
+                    },
+                )
+                
+                await self._cm.send_to_client(client_id, response_msg)
+                
+                logger.info(
+                    "Barge-in processed for client %s: type=%s, action=%s",
+                    client_id,
+                    result.interjection_response.type.value,
+                    result.interjection_response.resume_action.value,
+                )
+            
+            if result.error:
+                error_msg = ServerMessage(
+                    type="error",
+                    payload={
+                        "errorCode": "BARGE_IN_ERROR",
+                        "message": f"Error processing interruption: {result.error}",
+                        "degradedFunctionality": [],
+                    },
+                )
+                await self._cm.send_to_client(client_id, error_msg)
+                
+        except Exception as e:
+            logger.error("Error in barge-in async processing: %s", e, exc_info=True)
+            error_msg = ServerMessage(
+                type="error",
+                payload={
+                    "errorCode": "BARGE_IN_ERROR",
+                    "message": "Internal error processing interruption",
+                    "degradedFunctionality": [],
+                },
+            )
+            try:
+                await self._cm.send_to_client(client_id, error_msg)
+            except Exception:
+                pass  # Client may have disconnected
+
+    def _on_playback_pause(self, client_id: str, position: float) -> None:
+        """Callback when playback is paused due to barge-in."""
+        logger.debug("Playback paused for client %s at position %.2fs", client_id, position)
+        # Additional pause handling can be added here (e.g., notify Orchestrator)
+
+    def _on_playback_resume(self, client_id: str, position: float) -> None:
+        """Callback when playback resumes after barge-in."""
+        logger.debug("Playback resumed for client %s at position %.2fs", client_id, position)
+        # Additional resume handling can be added here (e.g., notify Orchestrator)
