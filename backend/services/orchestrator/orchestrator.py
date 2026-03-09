@@ -22,6 +22,7 @@ The DocumentaryOrchestrator coordinates all generation services:
   - NarrationEngine  → script + streaming audio (Task 9)
   - NanoIllustrator   → illustrations (Task 10)
   - SearchGrounder    → fact verification (Task 11)
+  - VeoGenerator     → cinematic video clips (Task 28)
   - SightModeHandler  → camera frame processing (Task 8)
   - VoiceModeHandler  → voice transcription + topic parsing (Task 15)
   - ConversationManager → intent classification + context (Task 16)
@@ -126,6 +127,7 @@ class DocumentaryOrchestrator:
         depth_dial_manager: Any = None,
         historical_character_manager: Any = None,
         mode_switch_manager: Any = None,
+        veo_generator: Any = None,
         on_stream_element: Optional[
             Callable[[str, ContentElement], Any]
         ] = None,
@@ -143,9 +145,11 @@ class DocumentaryOrchestrator:
         self._depth_dial = depth_dial_manager
         self._historical_character = historical_character_manager
         self._mode_switch = mode_switch_manager
+        self._veo = veo_generator
         self._on_stream_element = on_stream_element
         self._assembler = StreamAssembler()
         self._failures: list[TaskFailure] = []
+        self._last_video_elements: list[ContentElement] = []
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -246,7 +250,7 @@ class DocumentaryOrchestrator:
             )
         )
 
-        # Step 4: Assemble stream
+        # Step 4: Assemble stream (video elements added by _parallel_generate)
         return self._assembler.assemble(
             request_id=request.request_id,
             session_id=request.session_id,
@@ -254,6 +258,7 @@ class DocumentaryOrchestrator:
             narration_elements=narration_elements,
             illustration_elements=illustration_elements,
             fact_elements=fact_elements,
+            video_elements=self._last_video_elements,
         )
 
     async def voice_mode_workflow(
@@ -395,6 +400,7 @@ class DocumentaryOrchestrator:
             narration_elements=narration_elements,
             illustration_elements=illustration_elements,
             fact_elements=fact_elements,
+            video_elements=self._last_video_elements,
         )
 
         # ── Step 5: Record conversation turn ──────────────────────────────
@@ -521,6 +527,7 @@ class DocumentaryOrchestrator:
             narration_elements=narration_elements,
             illustration_elements=illustration_elements,
             fact_elements=fact_elements,
+            video_elements=self._last_video_elements,
         )
 
     async def _lore_mode_workflow_basic(
@@ -573,6 +580,7 @@ class DocumentaryOrchestrator:
             narration_elements=narration_elements,
             illustration_elements=illustration_elements,
             fact_elements=fact_elements,
+            video_elements=self._last_video_elements,
         )
 
     async def branch_documentary_workflow(
@@ -657,6 +665,7 @@ class DocumentaryOrchestrator:
             narration_elements=narration_elements,
             illustration_elements=illustration_elements,
             fact_elements=fact_elements,
+            video_elements=self._last_video_elements,
         )
 
     async def alternate_history_workflow(
@@ -743,6 +752,7 @@ class DocumentaryOrchestrator:
             narration_elements=narration_elements,
             illustration_elements=illustration_elements,
             fact_elements=fact_elements,
+            video_elements=self._last_video_elements,
         )
 
     # ── Mode transition ──────────────────────────────────────────────────────
@@ -853,9 +863,10 @@ class DocumentaryOrchestrator:
         previous_topics: list[str] | None = None,
         custom_instructions: str | None = None,
     ) -> tuple[list[ContentElement], list[ContentElement], list[ContentElement]]:
-        """Run narration, illustration, and search tasks in parallel.
+        """Run narration, illustration, search, and video tasks in parallel.
 
         Returns (narration_elements, illustration_elements, fact_elements).
+        Video elements are included in the assembled stream via the assembler.
         Each list may be empty if its service failed or is unavailable.
         """
         narration_task = self._retry_task(
@@ -897,25 +908,48 @@ class DocumentaryOrchestrator:
             mode=mode,
         )
 
+        # Video generation runs in parallel (Req 21.2, 6.1)
+        video_task = self._retry_task(
+            "video",
+            self._generate_video,
+            topic=topic,
+            place_name=place_name,
+            place_types=place_types or [],
+            visual_description=visual_description,
+            session_id=session_id,
+            user_id=user_id,
+            mode=mode,
+            language=language,
+        )
+
         results = await asyncio.gather(
             narration_task,
             illustration_task,
             search_task,
+            video_task,
             return_exceptions=True,
         )
 
         narration_elements = self._extract_result(results[0], "narration")
         illustration_elements = self._extract_result(results[1], "illustration")
         fact_elements = self._extract_result(results[2], "search")
+        video_elements = self._extract_result(results[3], "video")
 
         # Push elements to client in real-time if callback is set
         if self._on_stream_element:
-            all_elements = narration_elements + illustration_elements + fact_elements
+            all_elements = (
+                narration_elements + illustration_elements
+                + fact_elements + video_elements
+            )
             for elem in all_elements:
                 try:
                     await self._on_stream_element(session_id, elem)
                 except Exception:
                     logger.warning("Failed to push stream element to client")
+
+        # Store video_elements on the instance so callers can pass them
+        # to the assembler
+        self._last_video_elements = video_elements
 
         return narration_elements, illustration_elements, fact_elements
 
@@ -1075,6 +1109,79 @@ class DocumentaryOrchestrator:
                     verified=vr.verified,
                     confidence=vr.confidence,
                     sources=sources,
+                )
+            )
+
+        return elements
+
+    async def _generate_video(self, **kwargs: Any) -> list[ContentElement]:
+        """Generate video clips via VeoGenerator and convert to content elements.
+
+        Requirements: 6.1 (Veo 3.1), 6.6 (graceful degradation).
+        """
+        if not self._veo:
+            logger.debug("VeoGenerator not configured — skipping video generation")
+            return []
+
+        from ..veo_generator.models import DocumentaryContext as VeoDocContext
+        from ..veo_generator.models import SceneDescription, VideoStyle
+
+        topic = kwargs.get("topic", "")
+        place_name = kwargs.get("place_name", "")
+        visual_description = kwargs.get("visual_description", "")
+        mode = kwargs.get("mode", "sight")
+
+        # Determine style from mode
+        style = VideoStyle.CINEMATIC
+        if mode == "lore":
+            style = VideoStyle.DOCUMENTARY
+
+        # Build scene context
+        doc_ctx = VeoDocContext(
+            session_id=kwargs.get("session_id", ""),
+            mode=mode,
+            topic=topic,
+            place_name=place_name,
+            place_types=kwargs.get("place_types", []),
+            language=kwargs.get("language", "en"),
+        )
+
+        # Build scene prompt
+        prompt_parts = []
+        if place_name:
+            prompt_parts.append(f"Cinematic view of {place_name}.")
+        if visual_description:
+            prompt_parts.append(visual_description)
+        if topic and topic != place_name:
+            prompt_parts.append(f"Documentary about: {topic}.")
+        if not prompt_parts:
+            prompt_parts.append(f"Documentary scene about {topic or 'an interesting location'}.")
+
+        scene = SceneDescription(
+            prompt=" ".join(prompt_parts),
+            duration=8,
+            style=style,
+            context=doc_ctx,
+            generate_audio=True,
+        )
+
+        result = await self._veo.generate_clip(
+            scene,
+            user_id=kwargs.get("user_id"),
+            session_id=kwargs.get("session_id"),
+        )
+
+        if result.error:
+            logger.warning("Video generation failed: %s", result.error)
+            return []
+
+        elements: list[ContentElement] = []
+        if result.clip:
+            elements.append(
+                self._assembler.create_video_element(
+                    video_url=result.media_url or result.clip.url,
+                    video_duration=result.clip.duration,
+                    caption=topic or place_name,
                 )
             )
 
