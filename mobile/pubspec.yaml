@@ -48,6 +48,9 @@ dependencies:
   # HTTP
   http: ^1.2.2
 
+  # Video playback
+  video_player: ^2.9.2
+
   # Utilities
   uuid: ^4.5.1
   shared_preferences: ^2.3.5

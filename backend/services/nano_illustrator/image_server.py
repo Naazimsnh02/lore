@@ -26,7 +26,9 @@ logger = logging.getLogger(__name__)
 
 # Prefer GEMINI_API_KEY explicitly — avoid the GOOGLE_API_KEY conflict
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-MODEL_ID = "gemini-3.1-flash-image-preview"
+# Remove GOOGLE_API_KEY from env so the SDK doesn't override our explicit key
+os.environ.pop("GOOGLE_API_KEY", None)
+MODEL_ID = os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image-preview")
 PORT = int(os.getenv("IMAGE_SERVER_PORT", "8091"))
 
 

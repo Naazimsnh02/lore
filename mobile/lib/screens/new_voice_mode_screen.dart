@@ -19,6 +19,7 @@ import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
+import 'package:video_player/video_player.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -187,6 +188,8 @@ class _ChatMsg {
   // For image tool results
   Uint8List? imageBytes;
   String? imageMime;
+  // For video tool results
+  String? videoUrl;
 
   _ChatMsg({
     required this.id,
@@ -194,6 +197,7 @@ class _ChatMsg {
     required this.text,
     this.imageBytes,
     this.imageMime,
+    this.videoUrl,
   });
 }
 
@@ -350,26 +354,35 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen>
             'voice_config': {
               'prebuilt_voice_config': {'voice_name': 'Aoede'},
             },
-            // language_code on speech_config pins the output voice to English.
             'language_code': 'en-US',
           },
-          // Disable thinking tokens — they leak into outputTranscription.
           'thinking_config': {'include_thoughts': false, 'thinking_budget': 0},
         },
         'system_instruction': {
           'parts': [
             {
               'text':
-                  'You are LORE, an immersive AI documentary narrator. '
-                  'Deliver rich, engaging documentary narration about any topic '
-                  'the user asks about — history, science, culture, architecture, '
-                  'nature, and more. Speak naturally, as if narrating a high-quality '
-                  'documentary film. Be authoritative yet warm. '
+                  'You are LORE — an immersive AI documentary narrator. '
+                  'LORE turns the world into a living documentary. '
+                  'Users speak any topic — a landmark, historical event, scientific concept, '
+                  'culture, nature, architecture — and you deliver rich, cinematic documentary '
+                  'narration as if they are watching a high-quality BBC or National Geographic film. '
+                  'Be authoritative, vivid, and engaging. Use evocative language. '
+                  'Build narrative momentum — open with a compelling hook, develop the story, '
+                  'and leave the listener wanting more. '
                   'Always respond in English regardless of the language spoken to you. '
-                  'CRITICAL: Do NOT output any text enclosed in <think>, <thinking>, '
-                  'or <tool_use> tags. '
-                  'When the user asks you to generate, create, draw, or show an image '
-                  'or illustration, call the generate_image tool with a detailed prompt.',
+                  '\n\n'
+                  'TOOL USE RULES — follow these exactly:\n'
+                  '1. generate_image: You MUST call this function whenever the user says '
+                  '"show", "image", "picture", "draw", "illustrate", "what does it look like", '
+                  'or any similar visual request. Do NOT just describe — CALL THE FUNCTION.\n'
+                  '2. generate_video: You MUST call this function whenever the user says '
+                  '"video", "animate", "motion", "footage", "clip", "bring it to life", '
+                  '"show me a video", or any similar motion request. '
+                  'Before calling, say out loud: "Generating your video now — this takes about 60 to 90 seconds." '
+                  'Then CALL THE FUNCTION immediately.\n\n'
+                  'CRITICAL: When a tool is needed, call it — do not just narrate instead. '
+                  'Do NOT output <think>, <thinking>, or <tool_use> tags.',
             },
           ],
         },
@@ -379,16 +392,37 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen>
               {
                 'name': 'generate_image',
                 'description':
-                    'Generates a documentary-style illustration for the given topic. '
-                    'Call this when the user asks to see, show, draw, or generate an image.',
+                    'Generates a documentary-style illustration. '
+                    'Call when the user asks to see, show, draw, or visualise something, '
+                    'or when a still image would enhance the narration.',
                 'parameters': {
                   'type': 'object',
                   'properties': {
                     'prompt': {
                       'type': 'string',
                       'description':
-                          'Detailed image generation prompt describing the scene, '
-                          'style, and subject matter.',
+                          'Detailed image generation prompt. Include subject, style '
+                          '(photorealistic / historical painting / illustrated), '
+                          'lighting, and mood.',
+                    },
+                  },
+                  'required': ['prompt'],
+                },
+              },
+              {
+                'name': 'generate_video',
+                'description':
+                    'Generates a short cinematic video clip (8 seconds). '
+                    'Call when the user asks for a video, animation, or wants to see '
+                    'something in motion. Takes 60-90 seconds to generate.',
+                'parameters': {
+                  'type': 'object',
+                  'properties': {
+                    'prompt': {
+                      'type': 'string',
+                      'description':
+                          'Detailed video generation prompt. Include subject, camera movement '
+                          '(aerial pan, slow zoom, tracking shot), lighting, and documentary style.',
                     },
                   },
                   'required': ['prompt'],
@@ -397,6 +431,7 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen>
             ],
           },
         ],
+
         'input_audio_transcription': {},
         'output_audio_transcription': {},
         'realtime_input_config': {
@@ -540,6 +575,10 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen>
         final prompt = args['prompt'] as String? ?? '';
         _addSystemMsg('Generating image...');
         _runGenerateImage(id, prompt);
+      } else if (name == 'generate_video') {
+        final prompt = args['prompt'] as String? ?? '';
+        _addSystemMsg('Generating video — this takes ~60-90s...');
+        _runGenerateVideo(id, prompt);
       }
     }
   }
@@ -609,6 +648,71 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen>
             {
               'id': callId,
               'name': 'generate_image',
+              'response': {'error': e.toString()},
+            },
+          ],
+        },
+      });
+    }
+  }
+
+  Future<void> _runGenerateVideo(String callId, String prompt) async {
+    String videoEndpoint;
+    try {
+      final proxyUri = Uri.parse(_urlCtrl.text.trim());
+      videoEndpoint = 'http://${proxyUri.host}:8092/generate';
+    } catch (_) {
+      videoEndpoint = 'http://10.0.2.2:8092/generate';
+    }
+
+    try {
+      final resp = await http
+          .post(
+            Uri.parse(videoEndpoint),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({'prompt': prompt}),
+          )
+          .timeout(const Duration(minutes: 4));
+
+      if (resp.statusCode == 200) {
+        final body = json.decode(resp.body) as Map<String, dynamic>;
+        final videoUrl = body['video_url'] as String?;
+
+        if (videoUrl != null && videoUrl.isNotEmpty) {
+          if (mounted && !_disposed) {
+            setState(() {
+              _messages.add(_ChatMsg(
+                id: '${DateTime.now().microsecondsSinceEpoch}',
+                isUser: false,
+                text: '',
+                videoUrl: videoUrl,
+              ));
+            });
+            _scrollToBottom();
+          }
+          _wsSend({
+            'tool_response': {
+              'function_responses': [
+                {
+                  'id': callId,
+                  'name': 'generate_video',
+                  'response': {'result': 'Video generated successfully.'},
+                },
+              ],
+            },
+          });
+          return;
+        }
+      }
+      throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
+    } catch (e) {
+      _addSystemMsg('Video error: $e');
+      _wsSend({
+        'tool_response': {
+          'function_responses': [
+            {
+              'id': callId,
+              'name': 'generate_video',
               'response': {'error': e.toString()},
             },
           ],
@@ -980,6 +1084,11 @@ class _ChatBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Video bubble
+    if (msg.videoUrl != null) {
+      return _VideoBubble(url: msg.videoUrl!);
+    }
+
     // Image bubble
     if (msg.imageBytes != null) {
       return Align(
@@ -1043,6 +1152,119 @@ class _ChatBubble extends StatelessWidget {
             fontSize: 14,
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ── Video bubble ──────────────────────────────────────────────────────────────
+
+class _VideoBubble extends StatefulWidget {
+  final String url;
+  const _VideoBubble({required this.url});
+
+  @override
+  State<_VideoBubble> createState() => _VideoBubbleState();
+}
+
+class _VideoBubbleState extends State<_VideoBubble> {
+  late VideoPlayerController _ctrl;
+  bool _initialized = false;
+  bool _error = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = VideoPlayerController.networkUrl(Uri.parse(widget.url))
+      ..initialize().then((_) {
+        if (mounted) setState(() => _initialized = true);
+      }).catchError((_) {
+        if (mounted) setState(() => _error = true);
+      });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final width = MediaQuery.of(context).size.width * 0.85;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        width: width,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white.withAlpha(20)),
+          color: Colors.black,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: _error
+            ? const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Video unavailable',
+                  style: TextStyle(color: Colors.white38, fontSize: 12),
+                ),
+              )
+            : !_initialized
+                ? SizedBox(
+                    height: width * 9 / 16,
+                    child: const Center(
+                      child: CircularProgressIndicator(
+                        color: Colors.greenAccent,
+                        strokeWidth: 2,
+                      ),
+                    ),
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AspectRatio(
+                        aspectRatio: _ctrl.value.aspectRatio,
+                        child: VideoPlayer(_ctrl),
+                      ),
+                      // Controls row
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        child: Row(
+                          children: [
+                            IconButton(
+                              icon: Icon(
+                                _ctrl.value.isPlaying
+                                    ? Icons.pause_rounded
+                                    : Icons.play_arrow_rounded,
+                                color: Colors.greenAccent,
+                                size: 28,
+                              ),
+                              onPressed: () => setState(() {
+                                _ctrl.value.isPlaying
+                                    ? _ctrl.pause()
+                                    : _ctrl.play();
+                              }),
+                            ),
+                            Expanded(
+                              child: VideoProgressIndicator(
+                                _ctrl,
+                                allowScrubbing: true,
+                                colors: const VideoProgressColors(
+                                  playedColor: Colors.greenAccent,
+                                  bufferedColor: Colors.white24,
+                                  backgroundColor: Colors.white12,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
       ),
     );
   }
