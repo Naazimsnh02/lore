@@ -64,12 +64,23 @@ class CameraService {
 
     _controller = CameraController(
       camera,
-      ResolutionPreset.high,
+      ResolutionPreset.medium, // ~720p — keeps JPEG frames well under 500 KB
       enableAudio: false, // Audio is handled separately by MicrophoneService
       imageFormatGroup: ImageFormatGroup.jpeg,
     );
 
     await _controller!.initialize();
+    // Reset zoom to 1× — some devices default to a zoomed state
+    try {
+      await _controller!.setZoomLevel(1.0);
+    } catch (_) {
+      // setZoomLevel may throw if 1.0 is outside the device's min zoom range;
+      // in that case use the minimum available zoom
+      try {
+        final minZoom = await _controller!.getMinZoomLevel();
+        await _controller!.setZoomLevel(minZoom);
+      } catch (_) {}
+    }
     _log.info('Camera initialised: ${camera.name}');
   }
 
