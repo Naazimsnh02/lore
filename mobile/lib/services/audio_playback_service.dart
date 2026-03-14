@@ -5,6 +5,7 @@
 /// - Support background playback
 /// - Provide playback controls (play, pause, resume, stop, seek)
 /// - Handle audio queue for sequential narration segments
+/// - Stream live PCM chunks with low latency (addLiveChunk / flushLiveAudio)
 library;
 
 import 'dart:async';
@@ -29,6 +30,15 @@ class AudioPlaybackService {
   int _currentIndex = -1;
   int _tempFileCounter = 0;
   bool _disposed = false;
+
+  // Live streaming state — PCM chunks accumulate here until flushLiveAudio()
+  final List<Uint8List> _liveChunks = [];
+  static const int _sampleRate = 24000;
+  static const int _channels = 1;
+  static const int _bitsPerSample = 16;
+
+  // Minimum bytes to buffer before starting playback (~100ms at 24kHz 16-bit mono)
+  static const int _minPlaybackBytes = 24000 * 2 ~/ 10; // 4800 bytes ≈ 100ms
 
   // ── Public streams ──────────────────────────────────────────────────────
 
@@ -172,6 +182,71 @@ class AudioPlaybackService {
     } catch (e) {
       _log.warning('Failed to add audio to queue: $e');
     }
+  }
+
+  // ── Live PCM streaming ─────────────────────────────────────────────────
+
+  /// Append a raw PCM chunk from the Live API audio stream.
+  ///
+  /// Mirrors AudioLoop.play_audio() from the reference script — chunks are
+  /// buffered until we have enough for smooth playback (~100ms), then flushed
+  /// immediately so audio starts playing without waiting for turn_complete.
+  /// Call [flushLiveAudio] at turn_complete to play any remaining bytes.
+  Future<void> addLiveChunk(Uint8List pcmBytes) async {
+    if (_disposed || pcmBytes.isEmpty) return;
+    _liveChunks.add(pcmBytes);
+
+    // Start playing as soon as we have enough data for smooth playback.
+    // This mirrors the reference script's immediate play_audio() behaviour.
+    final buffered = _liveChunks.fold<int>(0, (sum, c) => sum + c.length);
+    if (buffered >= _minPlaybackBytes && !isPlaying) {
+      await _flushLiveChunksToQueue();
+    }
+  }
+
+  /// Finalise the current live turn: flush any remaining buffered PCM chunks.
+  ///
+  /// Called on turn_complete. Most audio will already be playing from the
+  /// incremental flushes in addLiveChunk; this handles the tail end.
+  Future<void> flushLiveAudio() async {
+    if (_disposed) return;
+    if (_liveChunks.isNotEmpty) {
+      await _flushLiveChunksToQueue();
+    }
+  }
+
+  /// Internal: concatenate buffered chunks, write one WAV, queue for playback.
+  Future<void> _flushLiveChunksToQueue() async {
+    if (_liveChunks.isEmpty) return;
+
+    final totalBytes = _liveChunks.fold<int>(0, (sum, c) => sum + c.length);
+    final pcmBytes = Uint8List(totalBytes);
+    var offset = 0;
+    for (final chunk in _liveChunks) {
+      pcmBytes.setAll(offset, chunk);
+      offset += chunk.length;
+    }
+    _liveChunks.clear();
+
+    try {
+      final wavFile = await _pcmToWavFile(
+        pcmBytes,
+        sampleRate: _sampleRate,
+        channels: _channels,
+        bitsPerSample: _bitsPerSample,
+      );
+      _queue.add(_QueueEntry(filePath: wavFile.path, label: 'live'));
+      if (!isPlaying && _currentIndex < 0) {
+        await playNext();
+      }
+    } catch (e) {
+      _log.warning('Failed to flush live audio: $e');
+    }
+  }
+
+  /// Discard buffered live chunks without playing (called on barge-in).
+  void discardLiveAudio() {
+    _liveChunks.clear();
   }
 
   /// Add a URL-based audio source to the queue.

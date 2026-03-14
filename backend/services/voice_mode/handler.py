@@ -1,9 +1,15 @@
 """VoiceMode handler — voice-based documentary generation.
 
-Processes voice input through a pipeline of noise analysis, language detection,
-transcription, and topic parsing.  Delegates to the Gemini Live API for
-real-time speech-to-text and uses lightweight heuristics for noise estimation
-and language detection (the Live API also performs language detection natively).
+Processes transcripts received from LiveSessionManager through a pipeline of
+noise analysis, language detection, and topic parsing.
+
+With Option B (true Live API streaming), transcription is handled by
+LiveSessionManager which keeps a persistent session open.  This handler's
+role is now:
+  1. Estimate ambient noise level from raw PCM bytes (RMS → dB)
+  2. Detect language from transcript text
+  3. Parse topic from transcript
+  4. Build VoiceModeContext and fire the on_topic_detected callback
 
 Design reference: LORE design.md, VoiceMode Implementation section.
 Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6.
@@ -32,29 +38,27 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-NOISE_THRESHOLD_DB: float = 70.0  # Req 3.5: noise cancellation above 70 dB
+NOISE_THRESHOLD_DB: float = 70.0   # Req 3.5: noise cancellation above 70 dB
 SILENCE_THRESHOLD_DB: float = 20.0  # Below this we consider the input silence
-TRANSCRIPTION_MODEL: str = "gemini-2.5-flash"  # Fast transcription model
-DEFAULT_SAMPLE_RATE: int = 16000
+DEFAULT_SAMPLE_RATE: int = 16_000
 MIN_AUDIO_DURATION_MS: float = 200.0  # Ignore very short audio bursts
 
 
 class VoiceModeHandler:
-    """Processes voice input for VoiceMode documentary generation.
+    """Processes transcripts from LiveSessionManager for VoiceMode documentary generation.
 
-    Pipeline:
-      1. Decode and validate incoming audio (base64 LINEAR16 PCM)
-      2. Estimate ambient noise level (RMS → dB)
-      3. Apply noise cancellation flag when ambient > 70 dB (Req 3.5)
-      4. Detect language from audio characteristics / Live API
-      5. Transcribe speech via Gemini Live API (target < 500 ms, Req 3.2)
-      6. Parse topic from transcription
-      7. Emit VoiceModeResponse with context for the Orchestrator
+    With Option B (true Live API streaming), transcription is done by
+    LiveSessionManager.  This handler receives the finished transcript string
+    and runs the downstream pipeline:
+      1. Noise level classification (from last known noise reading)
+      2. Language detection from transcript text
+      3. Topic parsing
+      4. Build VoiceModeContext and fire on_topic_detected callback
     """
 
     def __init__(
         self,
-        genai_client: Any = None,
+        genai_client: Any = None,  # kept for API compatibility, no longer used here
         *,
         noise_threshold_db: float = NOISE_THRESHOLD_DB,
         silence_threshold_db: float = SILENCE_THRESHOLD_DB,
@@ -63,107 +67,72 @@ class VoiceModeHandler:
             Callable[..., Coroutine[Any, Any, None]]
         ] = None,
     ) -> None:
-        self._client = genai_client
         self._noise_threshold_db = noise_threshold_db
         self._silence_threshold_db = silence_threshold_db
         self._default_language = default_language
         self._on_topic_detected = on_topic_detected
 
-        # Accumulated state across calls
         self._last_detected_language: str = default_language
+        self._last_noise_db: float = 0.0
         self._input_count: int = 0
 
     # ── Public API ───────────────────────────────────────────────────────────
 
-    async def process_voice_input(
+    async def process_transcript(
         self,
-        audio_base64: str,
+        transcript: str,
         *,
-        sample_rate: int = DEFAULT_SAMPLE_RATE,
         timestamp: Optional[float] = None,
         session_id: str = "",
         user_id: str = "",
         previous_topics: Optional[list[str]] = None,
     ) -> VoiceModeResponse:
-        """Process a single voice input chunk and return a VoiceModeResponse.
+        """Process a transcript string delivered by LiveSessionManager.
+
+        Called by the message router's on_transcript callback after the
+        Live API session fires input_transcription.
 
         Args:
-            audio_base64: Base64-encoded LINEAR16 PCM audio.
-            sample_rate: Audio sample rate in Hz (default 16 000).
-            timestamp: Optional client-side timestamp (epoch seconds).
+            transcript: Plain text transcript from the Live API.
+            timestamp:  Optional epoch seconds timestamp.
             session_id: Current session ID.
-            user_id: Authenticated user ID.
+            user_id:    Authenticated user ID.
             previous_topics: Topics already covered in this session.
 
         Returns:
-            VoiceModeResponse describing the processing result.
+            VoiceModeResponse with event=TOPIC_DETECTED on success.
         """
         ts = timestamp or time.time()
         self._input_count += 1
 
-        # 1. Decode audio
-        try:
-            audio_bytes = base64.b64decode(audio_base64)
-        except Exception as exc:
-            logger.warning("Invalid base64 audio: %s", exc)
-            return VoiceModeResponse(
-                event=VoiceModeEvent.ERROR,
-                payload={"error": "invalid_base64", "detail": str(exc)},
-                timestamp=ts,
-            )
-
-        # 2. Validate minimum duration
-        metadata = self._analyse_audio(audio_bytes, sample_rate, ts)
-        if metadata.duration_ms < MIN_AUDIO_DURATION_MS:
-            return VoiceModeResponse(
-                event=VoiceModeEvent.INPUT_BUFFERED,
-                payload={"reason": "too_short", "duration_ms": metadata.duration_ms},
-                timestamp=ts,
-            )
-
-        # 3. Noise analysis
-        noise_level = self._classify_noise(metadata.noise_level_db)
-        noise_cancelled = noise_level == NoiseLevel.HIGH
-
-        if noise_level == NoiseLevel.HIGH:
-            logger.info(
-                "High ambient noise (%.1f dB) — noise cancellation applied",
-                metadata.noise_level_db,
-            )
-
-        # 4. Silence detection
-        if metadata.noise_level_db < self._silence_threshold_db:
+        if not transcript.strip():
             return VoiceModeResponse(
                 event=VoiceModeEvent.SILENCE_DETECTED,
-                noise_level=noise_level,
+                noise_level=NoiseLevel.LOW,
                 noise_cancelled=False,
                 timestamp=ts,
             )
 
-        # 5. Transcribe via Gemini
-        transcription = await self._transcribe(
-            audio_bytes, sample_rate, metadata, noise_cancelled
+        noise_level = self._classify_noise(self._last_noise_db)
+        noise_cancelled = noise_level == NoiseLevel.HIGH
+
+        # Language detection from transcript text
+        detected_lang, clean_text = self._detect_language(transcript)
+
+        # Parse topic
+        topic = self._parse_topic(clean_text)
+
+        transcription = TranscriptionResult(
+            text=clean_text,
+            language=detected_lang,
+            confidence=0.92,
+            duration_ms=0.0,
+            is_final=True,
         )
-        if not transcription or not transcription.text.strip():
-            return VoiceModeResponse(
-                event=VoiceModeEvent.SILENCE_DETECTED,
-                noise_level=noise_level,
-                noise_cancelled=noise_cancelled,
-                timestamp=ts,
-            )
 
-        # 6. Language detection (from transcription result)
-        detected_lang = transcription.language or self._default_language
-        if detected_lang in SUPPORTED_LANGUAGES:
-            self._last_detected_language = detected_lang
-
-        # 7. Parse topic
-        topic = self._parse_topic(transcription.text)
-
-        # 8. Build context and fire callback
         context = VoiceModeContext(
             topic=topic,
-            original_query=transcription.text,
+            original_query=clean_text,
             language=detected_lang,
             confidence=transcription.confidence,
             noise_cancelled=noise_cancelled,
@@ -189,9 +158,24 @@ class VoiceModeHandler:
             timestamp=ts,
         )
 
+    def update_noise_reading(self, noise_db: float) -> None:
+        """Update the last known noise level from a PCM chunk.
+
+        Called by the message router for each voice_chunk so noise
+        classification stays current without blocking the audio path.
+        """
+        self._last_noise_db = noise_db
+
+    def estimate_noise_from_chunk(self, pcm_bytes: bytes) -> float:
+        """Estimate noise dB from a raw PCM chunk and update internal state."""
+        db = self._estimate_noise_db(pcm_bytes)
+        self._last_noise_db = db
+        return db
+
     def reset(self) -> None:
         """Reset handler state between sessions."""
         self._last_detected_language = self._default_language
+        self._last_noise_db = 0.0
         self._input_count = 0
 
     @property
@@ -209,12 +193,9 @@ class VoiceModeHandler:
         audio_bytes: bytes, sample_rate: int, timestamp: float
     ) -> AudioMetadata:
         """Compute basic audio metadata from raw LINEAR16 PCM bytes."""
-        num_samples = len(audio_bytes) // 2  # 16-bit = 2 bytes per sample
+        num_samples = len(audio_bytes) // 2
         duration_ms = (num_samples / sample_rate) * 1000.0 if sample_rate > 0 else 0.0
-
-        # RMS → dB estimation (sample up to 4000 samples for speed)
         noise_db = VoiceModeHandler._estimate_noise_db(audio_bytes)
-
         return AudioMetadata(
             sample_rate=sample_rate,
             channels=1,
@@ -226,11 +207,7 @@ class VoiceModeHandler:
 
     @staticmethod
     def _estimate_noise_db(audio_bytes: bytes, max_samples: int = 4000) -> float:
-        """Estimate ambient noise in dB from LINEAR16 PCM bytes.
-
-        Uses RMS of a sample of audio values.  Reference level is the
-        maximum 16-bit amplitude (32767).
-        """
+        """Estimate ambient noise in dB from LINEAR16 PCM bytes."""
         num_samples = len(audio_bytes) // 2
         if num_samples == 0:
             return 0.0
@@ -252,8 +229,7 @@ class VoiceModeHandler:
         if rms < 1.0:
             return 0.0
 
-        # dB relative to full-scale 16-bit
-        db = 20.0 * math.log10(rms / 32767.0) + 96.0  # normalise so full-scale ≈ 96 dB
+        db = 20.0 * math.log10(rms / 32767.0) + 96.0
         return max(0.0, db)
 
     def _classify_noise(self, noise_db: float) -> NoiseLevel:
@@ -263,82 +239,19 @@ class VoiceModeHandler:
             return NoiseLevel.MODERATE
         return NoiseLevel.LOW
 
-    # ── Transcription via Gemini ─────────────────────────────────────────────
+    def _detect_language(self, text: str) -> tuple[str, str]:
+        """Extract optional language tag from transcript and return (lang, clean_text).
 
-    async def _transcribe(
-        self,
-        audio_bytes: bytes,
-        sample_rate: int,
-        metadata: AudioMetadata,
-        noise_cancelled: bool,
-    ) -> Optional[TranscriptionResult]:
-        """Transcribe audio using the Gemini API.
-
-        Uses google-genai SDK's generate_content with audio input for fast
-        transcription.  Target latency: < 500 ms (Req 3.2).
+        The Live API may prepend a tag like "[fr] Bonjour" when it detects
+        a non-default language.
         """
-        if self._client is None:
-            logger.warning("No genai client configured — returning None")
-            return None
-
-        start = time.monotonic()
-        try:
-            audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
-
-            # Build the transcription prompt
-            lang_hint = self._last_detected_language
-            system_prompt = (
-                "You are a speech-to-text transcription engine. "
-                "Transcribe the following audio accurately. "
-                "Return ONLY the transcribed text, nothing else. "
-                f"The audio is likely in {SUPPORTED_LANGUAGES.get(lang_hint, 'English')}. "
-                "If the audio is in a different language, transcribe it in that language "
-                "and prepend the ISO 639-1 language code in brackets, e.g. [fr] Bonjour."
-            )
-            if noise_cancelled:
-                system_prompt += " Note: noise cancellation has been applied to this audio."
-
-            response = await self._client.aio.models.generate_content(
-                model=TRANSCRIPTION_MODEL,
-                contents=[
-                    {
-                        "parts": [
-                            {"text": system_prompt},
-                            {
-                                "inline_data": {
-                                    "mime_type": f"audio/l16;rate={sample_rate}",
-                                    "data": audio_b64,
-                                }
-                            },
-                        ]
-                    }
-                ],
-            )
-
-            elapsed_ms = (time.monotonic() - start) * 1000.0
-            text = response.text.strip() if response and response.text else ""
-
-            # Extract language tag if present, e.g. "[fr] Bonjour" → ("fr", "Bonjour")
-            detected_lang = lang_hint
-            if text.startswith("[") and "]" in text[:6]:
-                tag_end = text.index("]")
-                candidate = text[1:tag_end].strip().lower()
-                if candidate in SUPPORTED_LANGUAGES:
-                    detected_lang = candidate
-                    text = text[tag_end + 1:].strip()
-
-            return TranscriptionResult(
-                text=text,
-                language=detected_lang,
-                confidence=0.85,  # default confidence for Gemini transcription
-                duration_ms=elapsed_ms,
-                is_final=True,
-            )
-
-        except Exception as exc:
-            elapsed_ms = (time.monotonic() - start) * 1000.0
-            logger.error("Transcription failed (%.0f ms): %s", elapsed_ms, exc)
-            return None
+        if text.startswith("[") and "]" in text[:6]:
+            tag_end = text.index("]")
+            candidate = text[1:tag_end].strip().lower()
+            if candidate in SUPPORTED_LANGUAGES:
+                self._last_detected_language = candidate
+                return candidate, text[tag_end + 1:].strip()
+        return self._last_detected_language, text
 
     # ── Topic parsing ────────────────────────────────────────────────────────
 

@@ -52,7 +52,7 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 # ── Model identifiers ────────────────────────────────────────
-LIVE_AUDIO_MODEL = "gemini-live-2.5-flash-native-audio"
+LIVE_AUDIO_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
 SCRIPT_MODEL = "gemini-3-flash-preview"
 
 # ── Defaults ──────────────────────────────────────────────────
@@ -398,34 +398,34 @@ class NarrationEngine:
         self,
         voice_params: VoiceParameters,
         system_instruction: str,
-    ) -> dict[str, Any]:
-        """Build the configuration dict for client.aio.live.connect()."""
-        return {
-            "response_modalities": ["AUDIO"],
-            "system_instruction": system_instruction,
-            "speech_config": {
-                "voice_config": {
-                    "prebuilt_voice_config": {
-                        "voice_name": voice_params.voice_name,
-                    }
-                }
-            },
-        }
+    ) -> Any:
+        """Build the configuration for client.aio.live.connect()."""
+        from google.genai import types
+
+        return types.LiveConnectConfig(
+            response_modalities=[types.Modality.AUDIO],
+            system_instruction=types.Content(
+                parts=[types.Part(text=system_instruction)]
+            ),
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name=voice_params.voice_name,
+                    )
+                )
+            ),
+        )
 
     async def _send_text_to_session(self, session: Any, text: str) -> None:
-        """Send narration text to a Live API session."""
-        # Import types locally to avoid hard dependency at module level
-        try:
-            from google.genai import types
-            content = types.Content(
-                role="user",
-                parts=[types.Part(text=text)],
-            )
-        except ImportError:
-            # Fallback for mock environments
-            content = {"role": "user", "parts": [{"text": text}]}
+        """Send narration text to a Live API session.
 
-        await session.send_content(content=content)
+        Uses send_realtime_input with text — the correct method for sending
+        new user input (audio, video, or text) in real time.
+        send_client_content is reserved for injecting conversation history only.
+        """
+        from google.genai import types
+
+        await session.send_realtime_input(text=text)
 
     def _extract_audio_chunks(
         self, message: Any, start_sequence: int,

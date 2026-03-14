@@ -12,6 +12,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -89,6 +90,13 @@ class _VoiceModeScreenState extends ConsumerState<VoiceModeScreen>
       }
       return;
     }
+    // Open the persistent Live API session before starting the mic.
+    // Mirrors AudioLoop.run() → client.aio.live.connect() from the reference script.
+    final session = ref.read(sessionProvider);
+    _wsService.send(VoiceSessionStartMessage(
+      language: session.language,
+      timestamp: DateTime.now().millisecondsSinceEpoch,
+    ));
     await _startListening();
   }
 
@@ -96,16 +104,15 @@ class _VoiceModeScreenState extends ConsumerState<VoiceModeScreen>
     await _micService.startRecording();
     setState(() => _listening = true);
 
-    // Forward audio chunks to the WebSocket
+    // Stream each PCM chunk to the backend as a voice_chunk message.
+    // Mirrors AudioLoop.listen_audio() → out_queue.put({"data": ..., "mime_type": "audio/pcm"})
     _audioSub = _micService.audioChunks.listen((chunk) {
-      _wsService.send(VoiceInputMessage(
-        audioData: chunk.base64Audio,
-        sampleRate: chunk.sampleRate,
+      _wsService.send(VoiceChunkMessage(
+        data: chunk.base64Audio,
         timestamp: chunk.timestamp,
       ));
     });
 
-    // High-noise warning
     _noiseSub = _micService.noiseWarnings.listen((w) {
       if (mounted) setState(() => _highNoise = true);
       Future.delayed(const Duration(seconds: 3), () {
@@ -133,7 +140,6 @@ class _VoiceModeScreenState extends ConsumerState<VoiceModeScreen>
       }
     });
   }
-
   /// Handle incoming documentary content — auto-play narration audio and
   /// add assistant messages to the conversation.
   void _handleDocumentaryContent(DocumentaryStreamElement element) {
@@ -179,9 +185,29 @@ class _VoiceModeScreenState extends ConsumerState<VoiceModeScreen>
     }
   }
 
-  /// Handle raw WebSocket events for transcription and branch updates.
+  /// Handle raw WebSocket events for transcription, branch updates, and
+  /// live_audio PCM from the model's spoken response.
   void _handleRawEvent(Map<String, dynamic> json) {
     final type = json['type'] as String?;
+
+    // live_audio: raw PCM chunk from the model's Live API audio stream.
+    // Play each chunk immediately as it arrives — mirrors AudioLoop.play_audio()
+    // which reads from audio_in_queue without waiting for turn_complete.
+    // When final=true (turn_complete), flush any remaining buffered bytes.
+    if (type == 'live_audio') {
+      final payload = json['payload'] as Map<String, dynamic>?;
+      if (payload != null) {
+        final data = payload['data'] as String?;
+        final isFinal = payload['final'] as bool? ?? false;
+        if (data != null && data.isNotEmpty) {
+          _audioService.addLiveChunk(base64Decode(data));
+        }
+        if (isFinal) {
+          _audioService.flushLiveAudio();
+        }
+      }
+      return;
+    }
 
     if (type == 'transcription') {
       final payload = json['payload'] as Map<String, dynamic>?;
@@ -189,18 +215,57 @@ class _VoiceModeScreenState extends ConsumerState<VoiceModeScreen>
         final text = payload['text'] as String?;
         final topic = payload['topic'] as String?;
         final branchDepth = payload['branchDepth'] as int? ?? 0;
+        final role = payload['role'] as String? ?? 'user';
+        // partial=true → update the last assistant bubble in place (word-by-word).
+        // partial=false or absent → the turn is complete, message is finalised.
+        final isPartial = payload['partial'] as bool? ?? false;
 
         if (text != null && text.isNotEmpty) {
-          ref.read(sessionProvider.notifier).addConversationMessage(
-                ConversationMessage(
-                  id: _uuid.v4(),
-                  role: ConversationRole.user,
-                  text: text,
-                  timestamp: DateTime.now(),
+          if (role == 'assistant' && isPartial) {
+            // Update the last assistant message in place so the user sees one
+            // text box that grows as the model speaks — mirrors the reference
+            // script's print(text, end="") behaviour.
+            ref.read(sessionProvider.notifier).appendToLastAssistantMessage(
+                  text,
                   topic: topic,
                   branchDepth: branchDepth,
-                ),
-              );
+                );
+          } else if (role == 'assistant' && !isPartial) {
+            // Final consolidated text — only add a new message if we haven't
+            // been streaming partials (i.e. the last message isn't already this).
+            // If partials were streamed, the message is already complete.
+            final session = ref.read(sessionProvider);
+            final lastMsg = session.conversationHistory.isNotEmpty
+                ? session.conversationHistory.last
+                : null;
+            final alreadyStreamed = lastMsg != null &&
+                lastMsg.role == ConversationRole.assistant &&
+                lastMsg.text == text;
+            if (!alreadyStreamed) {
+              ref.read(sessionProvider.notifier).addConversationMessage(
+                    ConversationMessage(
+                      id: _uuid.v4(),
+                      role: ConversationRole.assistant,
+                      text: text,
+                      timestamp: DateTime.now(),
+                      topic: topic,
+                      branchDepth: branchDepth,
+                    ),
+                  );
+            }
+          } else {
+            // User transcript — always a new message
+            ref.read(sessionProvider.notifier).addConversationMessage(
+                  ConversationMessage(
+                    id: _uuid.v4(),
+                    role: ConversationRole.user,
+                    text: text,
+                    timestamp: DateTime.now(),
+                    topic: topic,
+                    branchDepth: branchDepth,
+                  ),
+                );
+          }
           ref.read(sessionProvider.notifier).setBranchDepth(branchDepth);
         }
       }
@@ -238,6 +303,10 @@ class _VoiceModeScreenState extends ConsumerState<VoiceModeScreen>
     _wsSub?.cancel();
     _playbackStatusSub?.cancel();
     _micService.stopRecording();
+    // Close the persistent Live API session when leaving VoiceMode.
+    _wsService.send(VoiceSessionEndMessage(
+      timestamp: DateTime.now().millisecondsSinceEpoch,
+    ));
     _pulseController.dispose();
     _waveformController.dispose();
     super.dispose();
@@ -295,9 +364,18 @@ class _VoiceModeScreenState extends ConsumerState<VoiceModeScreen>
               showStream: _showStream,
               onMicToggle: () async {
                 if (_listening) {
+                  // Stop streaming chunks first, then signal the backend
+                  // to flush VAD — mirrors audioStreamEnd in the reference script.
                   await _micService.stopRecording();
                   _audioSub?.cancel();
+                  _audioSub = null;
                   _noiseSub?.cancel();
+                  _noiseSub = null;
+                  // Send audioStreamEnd signal so the Live API VAD fires
+                  // and delivers the input_transcription.
+                  _wsService.send(VoiceMicStopMessage(
+                    timestamp: DateTime.now().millisecondsSinceEpoch,
+                  ));
                   setState(() => _listening = false);
                 } else {
                   await _startListening();

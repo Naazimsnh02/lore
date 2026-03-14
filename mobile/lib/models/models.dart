@@ -77,7 +77,7 @@ class CameraFrameMessage implements WsClientMessage {
       };
 }
 
-/// Sends base-64-encoded PCM audio to the server.
+/// Sends base-64-encoded PCM audio to the server (legacy single-blob mode).
 class VoiceInputMessage implements WsClientMessage {
   @override
   final String type = 'voice_input';
@@ -100,6 +100,83 @@ class VoiceInputMessage implements WsClientMessage {
           'sampleRate': sampleRate,
           'timestamp': timestamp,
         },
+      };
+}
+
+/// Sent when the user enters VoiceMode — opens a persistent Live API session.
+class VoiceSessionStartMessage implements WsClientMessage {
+  @override
+  final String type = 'voice_session_start';
+
+  final String language;
+  final int timestamp;
+
+  const VoiceSessionStartMessage({
+    required this.language,
+    required this.timestamp,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'payload': {
+          'language': language,
+          'timestamp': timestamp,
+        },
+      };
+}
+
+/// Streams a raw PCM chunk to the backend Live API session.
+///
+/// [data] is base64-encoded LINEAR16 PCM at 16 kHz mono.
+/// Mirrors AudioLoop.listen_audio() → out_queue.put({"data": ..., "mime_type": "audio/pcm"})
+/// from the reference script.
+class VoiceChunkMessage implements WsClientMessage {
+  @override
+  final String type = 'voice_chunk';
+
+  final String data; // base64-encoded raw PCM bytes
+  final int timestamp;
+
+  const VoiceChunkMessage({required this.data, required this.timestamp});
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'payload': {
+          'data': data,
+          'timestamp': timestamp,
+        },
+      };
+}
+
+/// Sent when the user releases the mic button — triggers audioStreamEnd / VAD flush.
+class VoiceMicStopMessage implements WsClientMessage {
+  @override
+  final String type = 'voice_mic_stop';
+
+  final int timestamp;
+  const VoiceMicStopMessage({required this.timestamp});
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'payload': {'timestamp': timestamp},
+      };
+}
+
+/// Sent when the user leaves VoiceMode — closes the persistent Live API session.
+class VoiceSessionEndMessage implements WsClientMessage {
+  @override
+  final String type = 'voice_session_end';
+
+  final int timestamp;
+  const VoiceSessionEndMessage({required this.timestamp});
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'payload': {'timestamp': timestamp},
       };
 }
 
@@ -352,6 +429,17 @@ class ConversationMessage {
         if (topic != null) 'topic': topic,
         'branchDepth': branchDepth,
       };
+
+  ConversationMessage copyWith({String? text, String? topic, int? branchDepth}) {
+    return ConversationMessage(
+      id: id,
+      role: role,
+      text: text ?? this.text,
+      timestamp: timestamp,
+      topic: topic ?? this.topic,
+      branchDepth: branchDepth ?? this.branchDepth,
+    );
+  }
 }
 
 // ─── App state models ────────────────────────────────────────────────────────

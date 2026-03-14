@@ -79,6 +79,45 @@ class SessionNotifier extends Notifier<SessionState> {
     );
   }
 
+  /// Append text to the last assistant message in place (for partial streaming).
+  ///
+  /// If the last message is already an assistant message, its text is extended.
+  /// Otherwise a new assistant message is created. This mirrors the reference
+  /// script's print(text, end="") behaviour — one text box that grows as the
+  /// model speaks rather than a new bubble per word.
+  void appendToLastAssistantMessage(
+    String text, {
+    String? topic,
+    int branchDepth = 0,
+  }) {
+    final history = state.conversationHistory;
+    if (history.isNotEmpty && history.last.role == ConversationRole.assistant) {
+      final updated = history.last.copyWith(
+        text: history.last.text + text,
+        topic: topic ?? history.last.topic,
+        branchDepth: branchDepth,
+      );
+      state = state.copyWith(
+        conversationHistory: [...history.sublist(0, history.length - 1), updated],
+      );
+    } else {
+      // No existing assistant message — create one
+      state = state.copyWith(
+        conversationHistory: [
+          ...history,
+          ConversationMessage(
+            id: DateTime.now().millisecondsSinceEpoch.toString(),
+            role: ConversationRole.assistant,
+            text: text,
+            timestamp: DateTime.now(),
+            topic: topic,
+            branchDepth: branchDepth,
+          ),
+        ],
+      );
+    }
+  }
+
   /// Clear the conversation history (e.g. on session reset).
   void clearConversation() =>
       state = state.copyWith(conversationHistory: [], branchDepth: 0);

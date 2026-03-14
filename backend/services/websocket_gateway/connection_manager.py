@@ -175,6 +175,10 @@ class ConnectionManager:
             await buf.peek_size(),
         )
 
+    # Alias used by MessageRouter handlers
+    async def send_to_client(self, client_id: str, message: ServerMessage) -> None:
+        await self.send(client_id, message)
+
     async def broadcast(self, message: ServerMessage) -> None:
         """Send a message to all currently active clients."""
         async with self._lock:
@@ -238,6 +242,16 @@ class ConnectionManager:
     def get_mode_switch_manager(self, client_id: str) -> "Optional[Any]":
         """Return the ModeSwitchManager for a client, or None."""
         return self._mode_switch_managers.get(client_id)
+
+    def get_session_id(self, client_id: str) -> Optional[str]:
+        """Return the session_id for a client, or None."""
+        info = self._info.get(client_id)
+        return info.session_id if info else None
+
+    def get_user_id(self, client_id: str) -> Optional[str]:
+        """Return the user_id for a client, or None."""
+        info = self._info.get(client_id)
+        return info.user_id if info else None
 
     def active_count(self) -> int:
         """Return the number of live WebSocket connections."""

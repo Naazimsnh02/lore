@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from typing import Any, Optional
 
@@ -47,8 +48,8 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-# Veo 3.1 model ID (GA stable)
-_MODEL_ID = "veo-3.1-generate-001"
+# Veo 3.1 model ID — use the env var, defaulting to the correct preview ID
+_MODEL_ID = os.getenv("VEO_MODEL", "veo-3.1-generate-preview")
 
 # Polling interval for long-running video generation
 _POLL_INTERVAL_S = 5.0

@@ -61,6 +61,35 @@ class VoiceInputPayload(BaseModel):
     timestamp: int
 
 
+# ── Live streaming voice message payloads (Option B) ─────────────────────────
+
+class VoiceSessionStartPayload(BaseModel):
+    """Client enters VoiceMode — open a persistent Live API session."""
+    language: str = "en"
+    timestamp: int = 0
+
+
+class VoiceChunkPayload(BaseModel):
+    """A raw PCM audio chunk streamed while the mic is active.
+
+    data is base64-encoded LINEAR16 PCM at 16 kHz mono.
+    Matches the {"data": ..., "mime_type": "audio/pcm"} pattern from the
+    reference AudioLoop.listen_audio() → out_queue.put() flow.
+    """
+    data: str   # base64-encoded raw PCM bytes
+    timestamp: int = 0
+
+
+class VoiceMicStopPayload(BaseModel):
+    """User released the mic button — send audioStreamEnd to flush VAD."""
+    timestamp: int = 0
+
+
+class VoiceSessionEndPayload(BaseModel):
+    """Client leaves VoiceMode — close the persistent Live API session."""
+    timestamp: int = 0
+
+
 class GPSUpdatePayload(BaseModel):
     latitude: float
     longitude: float
@@ -114,6 +143,10 @@ CLIENT_MESSAGE_TYPES = Literal[
     "mode_switch",
     "camera_frame",
     "voice_input",
+    "voice_session_start",
+    "voice_chunk",
+    "voice_mic_stop",
+    "voice_session_end",
     "gps_update",
     "barge_in",
     "query",

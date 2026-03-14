@@ -371,6 +371,7 @@ class NanoIllustrator:
         """Call Gemini 3.1 Flash Image Preview to generate an image.
 
         Requirements: 7.1 (Gemini 3.1 Flash Image Preview).
+        Uses response_modalities=["IMAGE"] — no ImageConfig needed for this model.
 
         Returns
         -------
@@ -382,15 +383,10 @@ class NanoIllustrator:
         IllustrationGenerationError
             If the model returns no image data.
         """
-        # Import types from google.genai
         from google.genai import types
 
         config = types.GenerateContentConfig(
-            response_modalities=["IMAGE"],
-            image_config=types.ImageConfig(
-                image_size=_IMAGE_SIZE,
-                aspect_ratio=aspect_ratio,
-            ),
+            response_modalities=["IMAGE", "TEXT"],
         )
 
         response = await self._client.aio.models.generate_content(
