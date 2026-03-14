@@ -10,6 +10,7 @@ import '../models/models.dart';
 import '../providers/app_providers.dart';
 import 'sight_mode_screen.dart';
 import 'voice_mode_screen.dart';
+import 'new_voice_mode_screen.dart';
 import 'lore_mode_screen.dart';
 import 'gps_walking_tour_screen.dart';
 
@@ -32,44 +33,59 @@ class HomeScreen extends ConsumerWidget {
               const _LoreHeader(),
               const SizedBox(height: 48),
 
-              // Mode cards
+              // Mode cards — scrollable so they fit on any screen size
               Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _ModeCard(
-                      title: 'SightMode',
-                      subtitle: 'Point your camera at a landmark',
-                      icon: Icons.camera_alt_outlined,
-                      gradient: const [Color(0xFF1A237E), Color(0xFF283593)],
-                      onTap: () => _enterMode(context, ref, LoreMode.sight),
-                    ),
-                    const SizedBox(height: 16),
-                    _ModeCard(
-                      title: 'VoiceMode',
-                      subtitle: 'Speak any topic for an instant documentary',
-                      icon: Icons.mic_outlined,
-                      gradient: const [Color(0xFF1B5E20), Color(0xFF2E7D32)],
-                      onTap: () => _enterMode(context, ref, LoreMode.voice),
-                    ),
-                    const SizedBox(height: 16),
-                    _ModeCard(
-                      title: 'LoreMode',
-                      subtitle:
-                          'Camera + Voice fusion — unlocks Alternate History',
-                      icon: Icons.auto_awesome_outlined,
-                      gradient: const [Color(0xFF4A148C), Color(0xFF6A1B9A)],
-                      onTap: () => _enterMode(context, ref, LoreMode.lore),
-                    ),
-                    const SizedBox(height: 16),
-                    _ModeCard(
-                      title: 'GPS Walking Tour',
-                      subtitle: 'Auto-discover landmarks as you walk',
-                      icon: Icons.map_outlined,
-                      gradient: const [Color(0xFFBF360C), Color(0xFFD84315)],
-                      onTap: () => _enterGpsWalkingTour(context, ref),
-                    ),
-                  ],
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _ModeCard(
+                        title: 'SightMode',
+                        subtitle: 'Point your camera at a landmark',
+                        icon: Icons.camera_alt_outlined,
+                        gradient: const [Color(0xFF1A237E), Color(0xFF283593)],
+                        onTap: () => _enterMode(context, ref, LoreMode.sight),
+                      ),
+                      const SizedBox(height: 16),
+                      _ModeCard(
+                        title: 'VoiceMode',
+                        subtitle: 'Speak any topic for an instant documentary',
+                        icon: Icons.mic_outlined,
+                        gradient: const [Color(0xFF1B5E20), Color(0xFF2E7D32)],
+                        onTap: () => _enterMode(context, ref, LoreMode.voice),
+                      ),
+                      const SizedBox(height: 16),
+                      _ModeCard(
+                        title: 'LoreMode',
+                        subtitle:
+                            'Camera + Voice fusion — unlocks Alternate History',
+                        icon: Icons.auto_awesome_outlined,
+                        gradient: const [Color(0xFF4A148C), Color(0xFF6A1B9A)],
+                        onTap: () => _enterMode(context, ref, LoreMode.lore),
+                      ),
+                      const SizedBox(height: 16),
+                      _ModeCard(
+                        title: 'GPS Walking Tour',
+                        subtitle: 'Auto-discover landmarks as you walk',
+                        icon: Icons.map_outlined,
+                        gradient: const [Color(0xFFBF360C), Color(0xFFD84315)],
+                        onTap: () => _enterGpsWalkingTour(context, ref),
+                      ),
+                      const SizedBox(height: 16),
+                      _ModeCard(
+                        title: 'Voice Mode (Live)',
+                        subtitle: 'Direct Gemini Live API — real-time voice',
+                        icon: Icons.spatial_audio_outlined,
+                        gradient: const [Color(0xFF004D40), Color(0xFF00695C)],
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const NewVoiceModeScreen(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
 

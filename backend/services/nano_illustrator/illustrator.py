@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 _MODEL_ID = "gemini-3.1-flash-image-preview"
 
 # Hard timeout per illustration request (Req 7.2: < 2 seconds)
-_GENERATION_TIMEOUT_S = 5.0  # Allow up to 5s for API; we report actual time
+_GENERATION_TIMEOUT_S = 60.0  # Allow up to 60s for API; we report actual time
 
 # Image size mapping: we request "1K" (1024×1024) minimum
 _IMAGE_SIZE = "1K"

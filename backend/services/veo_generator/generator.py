@@ -55,10 +55,10 @@ _MODEL_ID = os.getenv("VEO_MODEL", "veo-3.1-generate-preview")
 _POLL_INTERVAL_S = 5.0
 
 # Hard timeout for a single clip generation (Veo: 30-60s typical)
-_GENERATION_TIMEOUT_S = 120.0
+_GENERATION_TIMEOUT_S = 300.0
 
 # Maximum retries for polling operation status
-_MAX_POLL_RETRIES = 30  # 30 * 5s = 150s max
+_MAX_POLL_RETRIES = 60  # 60 * 5s = 300s max
 
 # Default negative prompt for documentary quality
 _DEFAULT_NEGATIVE_PROMPT = "blurry, low quality, distorted, watermark, text overlay"
@@ -362,9 +362,13 @@ class VeoGenerator:
         config_kwargs: dict[str, Any] = {
             "aspect_ratio": scene.aspect_ratio.value,
             "number_of_videos": 1,
-            "generate_audio": scene.generate_audio,
             "negative_prompt": scene.negative_prompt or _DEFAULT_NEGATIVE_PROMPT,
         }
+
+        # generate_audio is only supported on Vertex AI (output_gcs_uri required).
+        # Omit it entirely when using the Gemini API to avoid an API error.
+        if self._output_gcs_uri and scene.generate_audio:
+            config_kwargs["generate_audio"] = True
 
         # Duration: Veo accepts "4", "6", or "8"
         duration_val = str(min(max(scene.duration, 4), 8))

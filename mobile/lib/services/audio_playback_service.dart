@@ -30,6 +30,8 @@ class AudioPlaybackService {
   int _currentIndex = -1;
   int _tempFileCounter = 0;
   bool _disposed = false;
+  // Prevents concurrent playNext() calls from racing each other.
+  bool _playNextInProgress = false;
 
   // Live streaming state — PCM chunks accumulate here until flushLiveAudio()
   final List<Uint8List> _liveChunks = [];
@@ -201,8 +203,7 @@ class AudioPlaybackService {
     final buffered = _liveChunks.fold<int>(0, (sum, c) => sum + c.length);
     if (buffered >= _minPlaybackBytes && !isPlaying) {
       await _flushLiveChunksToQueue();
-    }
-  }
+    }  }
 
   /// Finalise the current live turn: flush any remaining buffered PCM chunks.
   ///
@@ -236,7 +237,8 @@ class AudioPlaybackService {
         bitsPerSample: _bitsPerSample,
       );
       _queue.add(_QueueEntry(filePath: wavFile.path, label: 'live'));
-      if (!isPlaying && _currentIndex < 0) {
+      // Auto-play if nothing is currently playing and no playNext is in flight.
+      if (!isPlaying && !_playNextInProgress) {
         await playNext();
       }
     } catch (e) {
@@ -247,6 +249,11 @@ class AudioPlaybackService {
   /// Discard buffered live chunks without playing (called on barge-in).
   void discardLiveAudio() {
     _liveChunks.clear();
+    // Also reset the queue index so the next turn auto-plays correctly.
+    if (!isPlaying) {
+      _queue.clear();
+      _currentIndex = -1;
+    }
   }
 
   /// Add a URL-based audio source to the queue.
@@ -262,36 +269,51 @@ class AudioPlaybackService {
   /// Play the next item in the queue.
   Future<void> playNext() async {
     if (_disposed) return;
-
-    final nextIndex = _currentIndex + 1;
-    if (nextIndex >= _queue.length) {
-      _log.fine('Queue complete — no more items');
-      _currentIndex = -1;
-      _statusController.add(PlaybackStatus.completed);
-      return;
-    }
-
-    _currentIndex = nextIndex;
-    final entry = _queue[_currentIndex];
-    _statusController.add(PlaybackStatus.loading);
+    // Guard against concurrent calls (from _onProcessingStateChanged and
+    // _flushLiveChunksToQueue firing at the same time).
+    if (_playNextInProgress) return;
+    _playNextInProgress = true;
 
     try {
-      if (entry.filePath != null) {
-        await _player.setFilePath(entry.filePath!);
-      } else if (entry.url != null) {
-        await _player.setUrl(entry.url!);
-      } else {
-        _log.warning('Queue entry has neither file path nor URL');
-        _statusController.add(PlaybackStatus.error);
+      final nextIndex = _currentIndex + 1;
+      if (nextIndex >= _queue.length) {
+        _log.fine('Queue complete — no more items');
+        _currentIndex = -1;
+        _statusController.add(PlaybackStatus.completed);
         return;
       }
-      await _player.play();
-      _statusController.add(PlaybackStatus.playing);
-    } catch (e) {
-      _log.warning('Failed to play queue item $_currentIndex: $e');
-      _statusController.add(PlaybackStatus.error);
-      // Skip to next on error
-      await playNext();
+
+      _currentIndex = nextIndex;
+      final entry = _queue[_currentIndex];
+      _statusController.add(PlaybackStatus.loading);
+
+      try {
+        // Stop any in-progress load/play before switching sources.
+        // This prevents just_audio's "Loading interrupted" error.
+        if (_player.playing) await _player.stop();
+
+        if (entry.filePath != null) {
+          await _player.setFilePath(entry.filePath!);
+        } else if (entry.url != null) {
+          await _player.setUrl(entry.url!);
+        } else {
+          _log.warning('Queue entry has neither file path nor URL');
+          _statusController.add(PlaybackStatus.error);
+          return;
+        }
+        await _player.play();
+        _statusController.add(PlaybackStatus.playing);
+      } catch (e) {
+        _log.warning('Failed to play queue item $_currentIndex: $e');
+        _statusController.add(PlaybackStatus.error);
+        // Skip to next on error — but only if we haven't already been reset
+        if (_currentIndex >= 0) {
+          _playNextInProgress = false;
+          await playNext();
+        }
+      }
+    } finally {
+      _playNextInProgress = false;
     }
   }
 
@@ -300,6 +322,7 @@ class AudioPlaybackService {
     await stop();
     _queue.clear();
     _currentIndex = -1;
+    _playNextInProgress = false;
   }
 
   // ── Disposal ────────────────────────────────────────────────────────────
@@ -327,7 +350,9 @@ class AudioPlaybackService {
   void _onProcessingStateChanged(ProcessingState state) {
     if (_disposed) return;
     if (state == ProcessingState.completed) {
-      // Auto-advance to the next queued item
+      // Auto-advance to the next queued item.
+      // Reset the mutex first — the completed item's playNext() call is done.
+      _playNextInProgress = false;
       if (hasNext) {
         playNext();
       } else {

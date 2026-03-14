@@ -437,8 +437,16 @@ class MessageRouter:
             },
         )
 
-        # Kick off documentary generation in the background
-        if self._orchestrator:
+        # Kick off documentary generation in the background ONLY when there is
+        # no active Live API session for this client.  During a live session,
+        # Gemini's native audio stream IS the narration — firing the orchestrator
+        # here would start a second NarrationEngine TTS stream simultaneously,
+        # causing the "double audio / overlapping voices" bug.
+        live_session_active = (
+            self._live_session_manager is not None
+            and self._live_session_manager.has_session(client_id)
+        )
+        if self._orchestrator and not live_session_active:
             asyncio.create_task(
                 self._generate_documentary_async(
                     client_id=client_id,
@@ -1041,16 +1049,19 @@ class MessageRouter:
             try:
                 from ..nano_illustrator.models import ConceptDescription, DocumentaryContext
                 concept = ConceptDescription(
-                    subject=args.get("topic", ""),
-                    description=args.get("description", ""),
-                    caption=args.get("caption", ""),
+                    prompt=args.get("description", ""),
+                    context=DocumentaryContext(
+                        topic=args.get("topic", ""),
+                        language=language,
+                        session_id=session_id,
+                    ),
                 )
-                ctx = DocumentaryContext(
-                    topic=args.get("topic", ""),
-                    language=language,
-                    session_id=session_id,
-                )
-                result = await self._nano_illustrator.generate_illustration(concept, ctx)
+                result = await self._nano_illustrator.generate_illustration(concept)
+                # Encode image bytes to base64 for JSON serialization.
+                # Raw bytes cannot be embedded in JSON and cause a UTF-8 error.
+                import base64 as _b64
+                raw_bytes = result.illustration.image_data if result.illustration else None
+                image_data_b64 = _b64.b64encode(raw_bytes).decode("utf-8") if raw_bytes else ""
                 # Push to Flutter client immediately
                 await self._cm.send_to_client(
                     client_id,
@@ -1062,8 +1073,8 @@ class MessageRouter:
                             "sequenceId": 0,
                             "timestamp": int(time.time() * 1000),
                             "content": {
-                                "imageData": result.illustration.image_data if result.illustration else "",
-                                "imageUrl": result.illustration.image_url if result.illustration else "",
+                                "imageData": image_data_b64,
+                                "imageUrl": result.illustration.url if result.illustration else "",
                                 "caption": args.get("caption", ""),
                                 "visualStyle": result.illustration.style.value if result.illustration else "",
                             },
@@ -1079,9 +1090,13 @@ class MessageRouter:
             if not self._veo_generator:
                 return {"status": "unavailable", "reason": "video generator not configured"}
             try:
-                result = await self._veo_generator.generate(
+                from ..veo_generator.models import SceneDescription, VideoStyle
+                scene = SceneDescription(
                     prompt=args.get("description", ""),
-                    topic=args.get("topic", ""),
+                    style=VideoStyle.CINEMATIC,
+                )
+                result = await self._veo_generator.generate_clip(
+                    scene=scene,
                     session_id=session_id,
                 )
                 await self._cm.send_to_client(
@@ -1094,8 +1109,8 @@ class MessageRouter:
                             "sequenceId": 0,
                             "timestamp": int(time.time() * 1000),
                             "content": {
-                                "videoUrl": getattr(result, "video_url", "") or "",
-                                "videoDuration": getattr(result, "duration_seconds", 0),
+                                "videoUrl": (result.clip.url or result.media_url or "") if result.clip else "",
+                                "videoDuration": result.clip.duration if result.clip else 0,
                             },
                         },
                     ),

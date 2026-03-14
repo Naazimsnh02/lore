@@ -26,6 +26,7 @@ dependencies:
 
   # Audio playback
   just_audio: ^0.10.5
+  flutter_pcm_sound: ^3.3.3
 
   # GPS / location
   geolocator: ^14.0.2

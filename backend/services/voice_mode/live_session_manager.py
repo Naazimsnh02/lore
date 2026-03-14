@@ -41,12 +41,21 @@ logger = logging.getLogger(__name__)
 
 # ── Constants matching the reference script ───────────────────────────────────
 
-LIVE_MODEL: str = os.getenv(
+_raw_model = os.getenv(
     "GEMINI_LIVE_MODEL", "models/gemini-2.5-flash-native-audio-preview-12-2025"
 )
+# The Live API requires the "models/" prefix. Guard against .env values that
+# omit it (e.g. GEMINI_LIVE_MODEL=gemini-2.5-flash-native-audio-preview-12-2025).
+LIVE_MODEL: str = _raw_model if _raw_model.startswith("models/") else f"models/{_raw_model}"
 SEND_SAMPLE_RATE: int = 16_000    # 16 kHz input — Gemini Live API requirement
 RECEIVE_SAMPLE_RATE: int = 24_000  # 24 kHz output PCM from the model
-OUT_QUEUE_MAXSIZE: int = 5         # matches reference script
+# The reference script uses maxsize=5 for a local PyAudio loop where the sender
+# keeps up trivially.  In our architecture the Flutter client sends chunks at
+# ~80 ms intervals over a WebSocket while _send_realtime awaits each
+# send_realtime_input() call over the network — the queue fills and drops chunks
+# before Gemini ever receives enough audio to respond.  100 slots ≈ 8 seconds of
+# headroom at 80 ms/chunk, which is more than enough for any network hiccup.
+OUT_QUEUE_MAXSIZE: int = 100
 
 # ── LORE documentary narrator system instruction ──────────────────────────────
 
@@ -242,10 +251,12 @@ class LiveSession:
         """
         from google.genai import types
 
-        # Tools: Google Search for grounding + function declarations for illustration/video.
-        # Mirrors the reference script's tools list structure exactly.
+        # Tools: function declarations for illustration/video.
+        # NOTE: google_search and function_declarations cannot coexist across
+        # separate Tool objects in the Live API — the server returns 1011.
+        # Google Search grounding is omitted here; the model can still use its
+        # built-in knowledge. Re-add GoogleSearch only if the API adds support.
         tools = [
-            types.Tool(google_search=types.GoogleSearch()),
             types.Tool(
                 function_declarations=[
                     types.FunctionDeclaration(**_FUNCTION_GENERATE_ILLUSTRATION),
@@ -266,8 +277,9 @@ class LiveSession:
                     )
                 )
             ),
-            # Input transcription with explicit language_code — fixes the Hindi bug
-            # where the model auto-detected the wrong language.
+            # Input transcription — AudioTranscriptionConfig has no fields in the
+            # current SDK (language_code is not a valid parameter and causes a
+            # Pydantic validation error that crashes the session before it opens).
             input_audio_transcription=types.AudioTranscriptionConfig(),
             # Output transcription — text of the model's spoken narration.
             # Arrives via server_content.output_transcription.text
@@ -306,8 +318,16 @@ class LiveSession:
     async def _send_realtime(self) -> None:
         """Drain out_queue and forward each item to the Live API session.
 
-        Mirrors AudioLoop.send_realtime() from the reference script.
-        Items are dicts with {"data": <bytes>, "mime_type": "audio/pcm;rate=16000"}.
+        Mirrors AudioLoop.send_realtime() from the reference script, with one
+        important addition: after receiving the first chunk we immediately drain
+        any additional chunks that have already accumulated in the queue and send
+        them all before yielding back to the event loop.
+
+        Why: Flutter sends audio at ~80 ms intervals.  Each send_realtime_input()
+        call awaits a network round-trip to Gemini.  Without batch-draining, the
+        sender falls one chunk behind per iteration and the queue fills up, causing
+        every subsequent chunk to be dropped and Gemini to receive silence.
+        Batch-draining keeps the queue near-empty so no chunks are lost.
         """
         from google.genai import types
 
@@ -315,6 +335,8 @@ class LiveSession:
             if self._out_queue is None:
                 await asyncio.sleep(0.01)
                 continue
+
+            # Block until at least one chunk is available (or timeout to check _running)
             try:
                 msg = await asyncio.wait_for(self._out_queue.get(), timeout=1.0)
             except asyncio.TimeoutError:
@@ -323,15 +345,26 @@ class LiveSession:
             if self._session is None:
                 continue
 
-            try:
-                await self._session.send_realtime_input(
-                    audio=types.Blob(
-                        data=msg["data"],
-                        mime_type=msg["mime_type"],
+            # Collect this chunk plus any that arrived while we were awaiting
+            msgs = [msg]
+            while True:
+                try:
+                    msgs.append(self._out_queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+
+            # Send all collected chunks
+            for m in msgs:
+                try:
+                    await self._session.send_realtime_input(
+                        audio=types.Blob(
+                            data=m["data"],
+                            mime_type=m["mime_type"],
+                        )
                     )
-                )
-            except Exception as exc:
-                logger.warning("send_realtime_input failed: %s", exc)
+                except Exception as exc:
+                    logger.warning("send_realtime_input failed: %s", exc)
+                    break
 
     async def _receive_audio(self) -> None:
         """Read all responses from the Live API session.
@@ -397,13 +430,38 @@ class LiveSession:
                                 logger.warning("on_audio_chunk (stream) failed: %s", exc)
                         continue
 
-                    # ── 2. Plain text (TEXT modality, not expected here) ──────
-                    if response.text:
-                        logger.debug(
-                            "response.text for session %s: %r",
-                            self.session_id, response.text
-                        )
-                        continue
+                    # ── 2. model_turn.parts — audio (inline_data) and text ───
+                    # The native audio model delivers PCM via
+                    # server_content.model_turn.parts[].inline_data as well as
+                    # via response.data (block 1 above handles the latter).
+                    # Thought parts (part.thought=True) must be skipped here to
+                    # avoid the SDK warning and to prevent internal reasoning
+                    # from leaking into transcription.
+                    # IMPORTANT: do NOT `continue` after this block — the same
+                    # response message can carry output_transcription /
+                    # turn_complete / interrupted in server_content (block 4).
+                    _sc_early = getattr(response, "server_content", None)
+                    _mt_early = getattr(_sc_early, "model_turn", None) if _sc_early else None
+                    if _mt_early:
+                        for _part in (getattr(_mt_early, "parts", None) or []):
+                            # Skip thought parts — internal reasoning only
+                            if getattr(_part, "thought", False):
+                                continue
+                            # Audio delivered via inline_data (native audio model)
+                            _inline = getattr(_part, "inline_data", None)
+                            if _inline and getattr(_inline, "data", None):
+                                if self._on_audio_chunk:
+                                    try:
+                                        await self._on_audio_chunk(_inline.data)
+                                    except Exception as exc:
+                                        logger.warning("on_audio_chunk (inline_data) failed: %s", exc)
+                            # Text parts (TEXT modality fallback) — log only
+                            elif getattr(_part, "text", None):
+                                logger.debug(
+                                    "model_turn text part for session %s: %r",
+                                    self.session_id, _part.text
+                                )
+                    # Fall through to block 3 / 4 — do NOT continue here.
 
                     # ── 3. Tool call — function calling ──────────────────────
                     tool_call = getattr(response, "tool_call", None)
@@ -457,21 +515,17 @@ class LiveSession:
                             except Exception as exc:
                                 logger.warning("on_transcript callback failed: %s", exc)
 
-                        # Fire output transcript final (complete narration text)
+                        # Output transcript final — log only, do NOT re-send to client.
+                        # The client already received every word via partial=True chunks
+                        # above. Re-sending the full concatenated text here would cause
+                        # the frontend to display the entire narration a second time
+                        # (duplicate text bug). We only log for debugging.
                         full_output = "".join(output_transcript_parts).strip()
-                        if full_output and self._on_output_transcript:
+                        if full_output:
                             logger.info(
                                 "Output transcript for session %s: %r",
                                 self.session_id, full_output
                             )
-                            try:
-                                await self._on_output_transcript(
-                                    full_output, partial=False
-                                )
-                            except TypeError:
-                                pass  # Already sent via partials above
-                            except Exception as exc:
-                                logger.warning("on_output_transcript (final) failed: %s", exc)
 
                         # Signal Flutter that the turn is complete — flush audio buffer.
                         if self._on_audio_chunk:
