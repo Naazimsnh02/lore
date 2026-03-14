@@ -16,6 +16,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
+import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -183,8 +184,17 @@ class _ChatMsg {
   final String id;
   final bool isUser;
   String text;
+  // For image tool results
+  Uint8List? imageBytes;
+  String? imageMime;
 
-  _ChatMsg({required this.id, required this.isUser, required this.text});
+  _ChatMsg({
+    required this.id,
+    required this.isUser,
+    required this.text,
+    this.imageBytes,
+    this.imageMime,
+  });
 }
 
 // ── Screen ────────────────────────────────────────────────────────────────────
@@ -277,11 +287,12 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen>
 
   Future<void> _connect() async {
     if (_disposed || _connecting || _connected) return;
-    if (mounted)
+    if (mounted) {
       setState(() {
         _connecting = true;
         _status = 'Connecting...';
       });
+    }
 
     try {
       final ws = WebSocketChannel.connect(Uri.parse(_urlCtrl.text.trim()));
@@ -340,12 +351,9 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen>
               'prebuilt_voice_config': {'voice_name': 'Aoede'},
             },
             // language_code on speech_config pins the output voice to English.
-            // This prevents the native audio model from switching voice/accent
-            // between sessions based on detected input language.
             'language_code': 'en-US',
           },
-          // Disable thinking tokens — they leak into outputTranscription as
-          // <think>...</think> tags and pollute the chat bubbles.
+          // Disable thinking tokens — they leak into outputTranscription.
           'thinking_config': {'include_thoughts': false, 'thinking_budget': 0},
         },
         'system_instruction': {
@@ -359,10 +367,36 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen>
                   'documentary film. Be authoritative yet warm. '
                   'Always respond in English regardless of the language spoken to you. '
                   'CRITICAL: Do NOT output any text enclosed in <think>, <thinking>, '
-                  'or <tool_use> tags.',
+                  'or <tool_use> tags. '
+                  'When the user asks you to generate, create, draw, or show an image '
+                  'or illustration, call the generate_image tool with a detailed prompt.',
             },
           ],
         },
+        'tools': [
+          {
+            'function_declarations': [
+              {
+                'name': 'generate_image',
+                'description':
+                    'Generates a documentary-style illustration for the given topic. '
+                    'Call this when the user asks to see, show, draw, or generate an image.',
+                'parameters': {
+                  'type': 'object',
+                  'properties': {
+                    'prompt': {
+                      'type': 'string',
+                      'description':
+                          'Detailed image generation prompt describing the scene, '
+                          'style, and subject matter.',
+                    },
+                  },
+                  'required': ['prompt'],
+                },
+              },
+            ],
+          },
+        ],
         'input_audio_transcription': {},
         'output_audio_transcription': {},
         'realtime_input_config': {
@@ -420,6 +454,14 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen>
       }
 
       final data = json.decode(text) as Map<String, dynamic>;
+
+      // Tool calls come as top-level {"toolCall": {...}} — handle before parse
+      // so they are never silently dropped.
+      if (data.containsKey('toolCall')) {
+        _handleToolCall(data);
+        return;
+      }
+
       final msg = _GeminiMsg.parse(data);
 
       switch (msg.type) {
@@ -434,13 +476,16 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen>
           }
 
         case _GeminiMsgType.inputTranscription:
-          // Only show finalized input transcription — partial frames frequently
-          // hallucinate non-English languages (known Gemini Live API bug).
-          // Showing only finished=true frames avoids the garbage mid-stream.
-          if (msg.text != null &&
-              msg.text!.isNotEmpty &&
-              (msg.textFinished ?? false)) {
-            _appendTranscript(msg.text!, isUser: true, finished: true);
+          // Append all deltas (mirrors official demo's "append" mode).
+          // We still only create a new bubble on the first delta, then
+          // accumulate — this gives us the full sentence by the time
+          // finished=true arrives, avoiding the empty-bubble bug.
+          if (msg.text != null && msg.text!.isNotEmpty) {
+            _appendTranscript(
+              msg.text!,
+              isUser: true,
+              finished: msg.textFinished ?? false,
+            );
           }
 
         case _GeminiMsgType.outputTranscription:
@@ -472,10 +517,104 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen>
           _addSystemMsg('[Interrupted]');
 
         case _GeminiMsgType.toolCall:
+          _handleToolCall(data);
+
         case _GeminiMsgType.unknown:
           break;
       }
     } catch (_) {}
+  }
+
+  // ── Tool calls ──────────────────────────────────────────────────────────────
+
+  void _handleToolCall(Map<String, dynamic> data) {
+    final toolCall = data['toolCall'] as Map<String, dynamic>?;
+    if (toolCall == null) return;
+    final calls = toolCall['functionCalls'] as List<dynamic>? ?? [];
+    for (final call in calls) {
+      final c = call as Map<String, dynamic>;
+      final name = c['name'] as String? ?? '';
+      final id = c['id'] as String? ?? '';
+      final args = c['args'] as Map<String, dynamic>? ?? {};
+      if (name == 'generate_image') {
+        final prompt = args['prompt'] as String? ?? '';
+        _addSystemMsg('Generating image...');
+        _runGenerateImage(id, prompt);
+      }
+    }
+  }
+
+  Future<void> _runGenerateImage(String callId, String prompt) async {
+    // Derive image gen endpoint: same host as proxy, port 8091
+    String imageEndpoint;
+    try {
+      final proxyUri = Uri.parse(_urlCtrl.text.trim());
+      final host = proxyUri.host;
+      imageEndpoint = 'http://$host:8091/generate';
+    } catch (_) {
+      imageEndpoint = 'http://10.0.2.2:8091/generate';
+    }
+
+    try {
+      final resp = await http
+          .post(
+            Uri.parse(imageEndpoint),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({'prompt': prompt}),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (resp.statusCode == 200) {
+        final body = json.decode(resp.body) as Map<String, dynamic>;
+        final imageBase64 = body['image_base64'] as String?;
+        final mime = body['mime_type'] as String? ?? 'image/png';
+
+        if (imageBase64 != null && imageBase64.isNotEmpty) {
+          final imageBytes = base64Decode(imageBase64);
+          // Show image in chat
+          if (mounted && !_disposed) {
+            setState(() {
+              _messages.add(_ChatMsg(
+                id: '${DateTime.now().microsecondsSinceEpoch}',
+                isUser: false,
+                text: '',
+                imageBytes: imageBytes,
+                imageMime: mime,
+              ));
+            });
+            _scrollToBottom();
+          }
+          // Send success response back to Gemini
+          _wsSend({
+            'tool_response': {
+              'function_responses': [
+                {
+                  'id': callId,
+                  'name': 'generate_image',
+                  'response': {'result': 'Image generated successfully.'},
+                },
+              ],
+            },
+          });
+          return;
+        }
+      }
+      throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
+    } catch (e) {
+      _addSystemMsg('Image error: $e');
+      // Send error response so Gemini can continue
+      _wsSend({
+        'tool_response': {
+          'function_responses': [
+            {
+              'id': callId,
+              'name': 'generate_image',
+              'response': {'error': e.toString()},
+            },
+          ],
+        },
+      });
+    }
   }
 
   // ── Audio recording ─────────────────────────────────────────────────────────
@@ -841,6 +980,25 @@ class _ChatBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Image bubble
+    if (msg.imageBytes != null) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 6),
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.85,
+          ),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white.withAlpha(20)),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Image.memory(msg.imageBytes!, fit: BoxFit.contain),
+        ),
+      );
+    }
+
     final isSystem = msg.text.startsWith('[') && msg.text.endsWith(']');
     if (isSystem) {
       return Padding(
