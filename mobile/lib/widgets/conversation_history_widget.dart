@@ -89,7 +89,8 @@ class _ConversationHistoryWidgetState
         final prevMessage = index > 0 ? messages[index - 1] : null;
 
         // Show a branch indicator when depth changes
-        final showBranchIndicator = prevMessage != null &&
+        final showBranchIndicator =
+            prevMessage != null &&
             message.branchDepth != prevMessage.branchDepth;
 
         return Column(
@@ -97,7 +98,7 @@ class _ConversationHistoryWidgetState
           children: [
             if (showBranchIndicator)
               _BranchIndicator(
-                entering: message.branchDepth > prevMessage!.branchDepth,
+                entering: message.branchDepth > prevMessage.branchDepth,
                 depth: message.branchDepth,
                 topic: message.topic,
               ),
@@ -123,8 +124,9 @@ class _ConversationBubble extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
-        mainAxisAlignment:
-            isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment: isUser
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!isUser) ...[

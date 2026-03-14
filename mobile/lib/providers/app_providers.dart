@@ -21,16 +21,19 @@ final authServiceProvider = Provider<AuthService>((_) => AuthService());
 
 final cameraServiceProvider = Provider<CameraService>((_) => CameraService());
 
-final microphoneServiceProvider =
-    Provider<MicrophoneService>((_) => MicrophoneService());
+final microphoneServiceProvider = Provider<MicrophoneService>(
+  (_) => MicrophoneService(),
+);
 
 final gpsServiceProvider = Provider<GpsService>((_) => GpsService());
 
-final webSocketServiceProvider =
-    Provider<WebSocketService>((_) => WebSocketService());
+final webSocketServiceProvider = Provider<WebSocketService>(
+  (_) => WebSocketService(),
+);
 
-final audioPlaybackServiceProvider =
-    Provider<AudioPlaybackService>((_) => AudioPlaybackService());
+final audioPlaybackServiceProvider = Provider<AudioPlaybackService>(
+  (_) => AudioPlaybackService(),
+);
 
 // ── Preferences ──────────────────────────────────────────────────────────────
 
@@ -42,23 +45,25 @@ final sharedPrefsProvider = FutureProvider<SharedPreferences>(
 // ── Session state ────────────────────────────────────────────────────────────
 
 /// The central session state notifier.
-class SessionNotifier extends StateNotifier<SessionState> {
-  SessionNotifier() : super(const SessionState());
+class SessionNotifier extends Notifier<SessionState> {
+  @override
+  SessionState build() => const SessionState();
 
   void setMode(LoreMode mode) => state = state.copyWith(activeMode: mode);
 
   void setDepthDial(DepthDial dial) => state = state.copyWith(depthDial: dial);
 
-  void setLanguage(String language) => state = state.copyWith(language: language);
+  void setLanguage(String language) =>
+      state = state.copyWith(language: language);
 
-  void setConnected(bool connected) => state = state.copyWith(isConnected: connected);
+  void setConnected(bool connected) =>
+      state = state.copyWith(isConnected: connected);
 
-  void setError(String? message) => state = state.copyWith(errorMessage: message);
+  void setError(String? message) =>
+      state = state.copyWith(errorMessage: message);
 
   void addStreamElement(DocumentaryStreamElement element) {
-    state = state.copyWith(
-      streamElements: [...state.streamElements, element],
-    );
+    state = state.copyWith(streamElements: [...state.streamElements, element]);
   }
 
   void clearStream() => state = state.copyWith(streamElements: []);
@@ -75,10 +80,8 @@ class SessionNotifier extends StateNotifier<SessionState> {
   }
 
   /// Clear the conversation history (e.g. on session reset).
-  void clearConversation() => state = state.copyWith(
-        conversationHistory: [],
-        branchDepth: 0,
-      );
+  void clearConversation() =>
+      state = state.copyWith(conversationHistory: [], branchDepth: 0);
 
   /// Update whether narration audio is currently playing.
   void setNarrationPlaying(bool playing) =>
@@ -88,5 +91,6 @@ class SessionNotifier extends StateNotifier<SessionState> {
   void setBranchDepth(int depth) => state = state.copyWith(branchDepth: depth);
 }
 
-final sessionProvider =
-    StateNotifierProvider<SessionNotifier, SessionState>((_) => SessionNotifier());
+final sessionProvider = NotifierProvider<SessionNotifier, SessionState>(
+  () => SessionNotifier(),
+);
