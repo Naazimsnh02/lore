@@ -68,6 +68,13 @@ dev_dependencies:
   riverpod_generator: ^4.0.0+1
   build_runner: ^2.4.14
   mockito: ^5.4.5
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/images/icon.png"
+  min_sdk_android: 21 # android min sdk version
 
 flutter:
   uses-material-design: true
