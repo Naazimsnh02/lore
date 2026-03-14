@@ -51,6 +51,9 @@ dependencies:
   # Video playback
   video_player: ^2.9.2
 
+  # Gallery save
+  gal: ^2.3.0
+
   # Utilities
   uuid: ^4.5.1
   shared_preferences: ^2.3.5

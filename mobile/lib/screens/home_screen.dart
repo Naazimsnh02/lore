@@ -52,13 +52,15 @@ class HomeScreen extends ConsumerWidget {
                         subtitle: 'Speak any topic for an instant documentary',
                         icon: Icons.mic_outlined,
                         gradient: const [Color(0xFF1B5E20), Color(0xFF2E7D32)],
-                        onTap: () => _enterMode(context, ref, LoreMode.voice),
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const NewVoiceModeScreen()),
+                        ),
                       ),
                       const SizedBox(height: 16),
                       _ModeCard(
                         title: 'LoreMode',
-                        subtitle:
-                            'Camera + Voice fusion — unlocks Alternate History',
+                        subtitle: 'Camera + Voice fusion — unlocks Alternate History',
                         icon: Icons.auto_awesome_outlined,
                         gradient: const [Color(0xFF4A148C), Color(0xFF6A1B9A)],
                         onTap: () => _enterMode(context, ref, LoreMode.lore),
@@ -70,19 +72,6 @@ class HomeScreen extends ConsumerWidget {
                         icon: Icons.map_outlined,
                         gradient: const [Color(0xFFBF360C), Color(0xFFD84315)],
                         onTap: () => _enterGpsWalkingTour(context, ref),
-                      ),
-                      const SizedBox(height: 16),
-                      _ModeCard(
-                        title: 'Voice Mode (Live)',
-                        subtitle: 'Direct Gemini Live API — real-time voice',
-                        icon: Icons.spatial_audio_outlined,
-                        gradient: const [Color(0xFF004D40), Color(0xFF00695C)],
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const NewVoiceModeScreen(),
-                          ),
-                        ),
                       ),
                     ],
                   ),

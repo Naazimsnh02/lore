@@ -28,8 +28,18 @@ logger = logging.getLogger(__name__)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # Remove GOOGLE_API_KEY from env so the SDK doesn't override our explicit key
 os.environ.pop("GOOGLE_API_KEY", None)
+USE_VERTEX = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "false").lower() == "true"
+GCP_PROJECT = os.getenv("GCP_PROJECT_ID", "")
+VERTEX_LOCATION = os.getenv("VERTEX_AI_LOCATION", "us-central1")
 MODEL_ID = os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image-preview")
 PORT = int(os.getenv("IMAGE_SERVER_PORT", "8091"))
+
+
+def _make_client():
+    from google import genai
+    if USE_VERTEX:
+        return genai.Client(vertexai=True, project=GCP_PROJECT, location=VERTEX_LOCATION)
+    return genai.Client(api_key=GEMINI_API_KEY)
 
 
 async def handle_generate(request: web.Request) -> web.Response:
@@ -54,7 +64,7 @@ async def handle_generate(request: web.Request) -> web.Response:
         from google import genai
         from google.genai import types
 
-        client = genai.Client(api_key=GEMINI_API_KEY)
+        client = _make_client()
 
         print(f"Generating image for prompt: {prompt[:80]}...")
 
@@ -94,7 +104,9 @@ async def main():
         return
 
     print(f"Using model: {MODEL_ID}")
-    print(f"API key: {GEMINI_API_KEY[:8]}...")
+    print(f"Mode: {'Vertex AI' if USE_VERTEX else 'AI Studio'}")
+    if not USE_VERTEX:
+        print(f"API key: {GEMINI_API_KEY[:8]}...")
 
     app = web.Application()
     app.router.add_post("/generate", handle_generate)
