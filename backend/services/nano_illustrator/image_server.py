@@ -19,7 +19,18 @@ from pathlib import Path
 from aiohttp import web
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parents[3] / ".env")
+# Load .env from project root if it exists
+def _load_env():
+    current = Path(__file__).resolve()
+    for _ in range(5):
+        env_path = current.parent / ".env"
+        if env_path.exists():
+            load_dotenv(env_path)
+            return
+        current = current.parent
+        if current == current.parent:
+            break
+_load_env()
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -32,7 +43,7 @@ USE_VERTEX = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "false").lower() == "true"
 GCP_PROJECT = os.getenv("GCP_PROJECT_ID", "")
 VERTEX_LOCATION = os.getenv("VERTEX_AI_LOCATION", "us-central1")
 MODEL_ID = os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image-preview")
-PORT = int(os.getenv("IMAGE_SERVER_PORT", "8091"))
+PORT = int(os.getenv("IMAGE_SERVER_PORT") or os.getenv("PORT") or "8091")
 
 
 def _make_client():

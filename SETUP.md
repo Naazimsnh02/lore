@@ -70,6 +70,8 @@ flutter --version    # Flutter 3.x
 python --version     # Python 3.11+
 ```
 
+> **Windows Users:** To run the `.sh` deployment scripts later, please use **Git Bash** (installed with Git for Windows) or **WSL**.
+
 ### 2. Authenticate with Google Cloud
 
 ```bash
@@ -174,28 +176,83 @@ flutter run --dart-define-from-file=dart-defines.json
 
 ## Deployment to Cloud Run
 
-### Step 1 — Gemini Live proxy
+We provide automated scripts in `infrastructure/scripts/` to handle project setup and deployment for both Linux/macOS (`.sh`) and Windows PowerShell (`.ps1`).
 
+### 1. One-time project bootstrap
+
+Run the bootstrap script to enable required APIs, create the service account, and grant necessary roles. This replaces the manual API enablement steps.
+
+**Linux / macOS / Git Bash:**
 ```bash
-cd backend/services/gemini_live_proxy
-gcloud builds submit --tag gcr.io/<YOUR_GCP_PROJECT_ID>/lore-gemini-proxy:latest --project <YOUR_GCP_PROJECT_ID>
-gcloud run deploy lore-gemini-proxy \
-  --image gcr.io/<YOUR_GCP_PROJECT_ID>/lore-gemini-proxy:latest \
-  --region <YOUR_GCP_REGION> --platform managed \
-  --set-env-vars GCP_PROJECT_ID=<YOUR_GCP_PROJECT_ID> \
-  --allow-unauthenticated --project <YOUR_GCP_PROJECT_ID>
+# Usage: ./infrastructure/scripts/bootstrap.sh <PROJECT_ID> [REGION]
+./infrastructure/scripts/bootstrap.sh my-lore-project us-central1
 ```
 
-*(Repeat similar steps for `lore-nano-illustrator` and `lore-veo-generator`)*
+**Windows PowerShell:**
+```powershell
+# Usage: .\infrastructure\scripts\bootstrap.ps1 -ProjectId <PROJECT_ID> [-Region <REGION>]
+.\infrastructure\scripts\bootstrap.ps1 -ProjectId my-lore-project -Region us-central1
+```
 
-### Step 2 — Update dart-defines.json for production
+After bootstrapping, you must store your Places API key in Secret Manager (as instructed by the script output):
+
+```bash
+# Linux/macOS
+echo -n 'YOUR_PLACES_API_KEY' | \
+  gcloud secrets create lore-places-api-key --data-file=- --project=my-lore-project
+
+# Windows PowerShell
+echo 'YOUR_PLACES_API_KEY' | gcloud secrets create lore-places-api-key --data-file=- --project=my-lore-project
+```
+
+Grant the service account access to the secret:
+
+```bash
+gcloud secrets add-iam-policy-binding lore-places-api-key \
+  --member='serviceAccount:lore-backend@my-lore-project.iam.gserviceaccount.com' \
+  --role='roles/secretmanager.secretAccessor' \
+  --project=my-lore-project
+```
+
+### 2. Deploy services
+
+Deploy all three services (`lore-gemini-proxy`, `lore-nano-illustrator`, `lore-veo-generator`) using the deployment script.
+
+**Linux / macOS / Git Bash:**
+```bash
+# Usage: ./infrastructure/scripts/deploy.sh --project <PROJECT_ID> [--vertex]
+./infrastructure/scripts/deploy.sh --project my-lore-project --vertex
+```
+
+**Windows PowerShell:**
+```powershell
+# Usage: .\infrastructure\scripts\deploy.ps1 -ProjectId <PROJECT_ID> [-Vertex]
+.\infrastructure\scripts\deploy.ps1 -ProjectId my-lore-project -Vertex
+```
+
+> Use `--vertex` (Bash) or `-Vertex` (PowerShell) to use Vertex AI for the Live API, which is recommended for production.
+
+> Use `--vertex` to use Vertex AI for the Live API, which is recommended for production.
+
+### 3. Update mobile/dart-defines.json for production
+
+The deployment script will output a template for your production `dart-defines.json`. It should look like this:
 
 ```json
 {
   "GEMINI_PROXY_URL": "wss://lore-gemini-proxy-<HASH>-<REGION>.a.run.app",
-  "GCP_PROJECT_ID": "<YOUR_GCP_PROJECT_ID>",
-  "GOOGLE_MAPS_API_KEY": "<YOUR_MAPS_API_KEY>"
+  "NANO_ILLUSTRATOR_URL": "https://lore-nano-illustrator-<HASH>-<REGION>.a.run.app/generate",
+  "VEO_GENERATOR_URL": "https://lore-veo-generator-<HASH>-<REGION>.a.run.app/generate",
+  "GCP_PROJECT_ID": "my-lore-project",
+  "GOOGLE_MAPS_API_KEY": "<your-maps-api-key>",
+  "GOOGLE_GENAI_USE_VERTEXAI": "true"
 }
+```
+
+Then rebuild the app:
+```bash
+cd mobile
+flutter build apk --dart-define-from-file=dart-defines.json
 ```
 
 ---

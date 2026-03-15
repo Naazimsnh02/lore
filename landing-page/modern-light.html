@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LORE — The World Is Your Documentary</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400;1,700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --white: #ffffff;
+            --off-white: #f8f6f2;
+            --light: #f0ede8;
+            --border: #e8e4de;
+            --border-dark: #d4cfc8;
+            --text: #1a1814;
+            --text-secondary: #5a5550;
+            --text-muted: #9a9590;
+            --accent: #b8722a;
+            --accent-light: #e8a84a;
+            --accent-bg: #fdf5ec;
+            --accent-border: #f0d4a8;
+            --green: #3a7a5a;
+            --green-bg: #eef6f1;
+            --teal: #2a6a7a;
+            --teal-bg: #eef4f6;
+            --gold: #8a6a1a;
+            --gold-bg: #faf4e4;
+        }
+
+        html { scroll-behavior: smooth; }
+        body { background: var(--white); color: var(--text); font-family: 'Inter', sans-serif; overflow-x: hidden; }
+
+        /* NAV */
+        nav {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 48px; height: 68px;
+            background: transparent;
+            backdrop-filter: none;
+            border-bottom: 1px solid transparent;
+            transition: all 0.3s ease;
+        }
+        nav.scrolled {
+            background: rgba(255,255,255,0.92);
+            backdrop-filter: blur(16px);
+            border-bottom-color: var(--border);
+        }
+        .nav-logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+        .nav-logo-img {
+            width: 32px; height: 32px;
+            object-fit: cover;
+            border-radius: 50%;
+            filter: drop-shadow(0 2px 8px rgba(184,114,42,0.3));
+        }
+        .nav-logo-text {
+            font-family: 'Playfair Display', serif; font-size: 20px;
+            font-weight: 700; letter-spacing: 4px; color: #ffffff;
+            transition: color 0.3s ease;
+        }
+        nav.scrolled .nav-logo-text { color: var(--text); }
+        .nav-links { display: flex; gap: 8px; }
+        .nav-link {
+            background: none; border: none; cursor: pointer;
+            font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 500;
+            letter-spacing: 1px; text-transform: uppercase;
+            color: rgba(255,255,255,0.8); padding: 6px 14px; border-radius: 20px;
+            transition: all 0.3s ease;
+        }
+        nav.scrolled .nav-link { color: var(--text-secondary); }
+        .nav-link:hover, .nav-link.active { background: var(--accent-bg); color: var(--accent); }
+        .nav-badge {
+            font-family: 'Space Mono', monospace; font-size: 9px;
+            color: var(--accent-light); letter-spacing: 1px;
+            transition: all 0.3s ease;
+        }
+        nav.scrolled .nav-badge { color: var(--accent); }
+
+        /* HERO */
+        .hero {
+            min-height: 100vh; position: relative; display: flex;
+            flex-direction: column; align-items: center; justify-content: center;
+            overflow: hidden;
+        }
+        .hero-bg {
+            position: absolute; inset: 0;
+            background-image: url('hero-bg.png');
+            background-size: cover; background-position: center;
+            filter: brightness(0.45) saturate(0.8);
+        }
+        .hero-bg-fallback {
+            position: absolute; inset: 0;
+            background: linear-gradient(160deg, #1a0e06 0%, #2d1a08 30%, #0e1a1a 70%, #060e14 100%);
+        }
+        .hero-overlay {
+            position: absolute; inset: 0;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.6) 100%);
+        }
+        .hero-content {
+            position: relative; z-index: 2; text-align: center;
+            max-width: 860px; padding: 0 32px;
+            animation: fadeUp 1s ease both;
+        }
+        .hero-eyebrow {
+            display: inline-flex; align-items: center; gap: 8px;
+            font-family: 'Space Mono', monospace; font-size: 10px;
+            letter-spacing: 3px; text-transform: uppercase;
+            color: rgba(232,168,74,0.9);
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(232,168,74,0.3);
+            padding: 6px 16px; border-radius: 20px; margin-bottom: 32px;
+        }
+        .hero-title {
+            font-family: 'Playfair Display', serif; font-weight: 700;
+            font-size: clamp(72px, 12vw, 140px); line-height: 0.92;
+            color: #ffffff; letter-spacing: -2px;
+            text-shadow: 0 4px 40px rgba(0,0,0,0.4);
+            margin-bottom: 12px;
+        }
+        .hero-subtitle {
+            font-family: 'Playfair Display', serif; font-style: italic;
+            font-size: clamp(18px, 2.5vw, 26px); color: rgba(232,168,74,0.9);
+            letter-spacing: 3px; margin-bottom: 28px;
+        }
+        .hero-desc {
+            font-size: 16px; line-height: 1.75; color: rgba(255,255,255,0.7);
+            max-width: 560px; margin: 0 auto 48px; font-weight: 300;
+        }
+        .hero-typed {
+            font-family: 'Space Mono', monospace; font-size: 13px;
+            color: rgba(232,168,74,0.8); margin-bottom: 48px; height: 22px;
+        }
+        .hero-cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+        .btn-primary {
+            padding: 14px 36px; background: var(--accent); border: none;
+            font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600;
+            letter-spacing: 2px; text-transform: uppercase; color: #fff;
+            cursor: pointer; border-radius: 4px; transition: all 0.25s;
+            box-shadow: 0 4px 20px rgba(184,114,42,0.4);
+        }
+        .btn-primary:hover { background: #a06020; transform: translateY(-1px); box-shadow: 0 6px 28px rgba(184,114,42,0.5); }
+        .btn-outline {
+            padding: 14px 36px; background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.3);
+            font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600;
+            letter-spacing: 2px; text-transform: uppercase; color: rgba(255,255,255,0.85);
+            cursor: pointer; border-radius: 4px; transition: all 0.25s;
+            backdrop-filter: blur(8px);
+        }
+        .btn-outline:hover { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.5); }
+        .hero-scroll {
+            position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
+            z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 8px;
+            color: rgba(255,255,255,0.4); font-size: 10px; letter-spacing: 3px;
+            text-transform: uppercase; font-family: 'Space Mono', monospace;
+            animation: fadeIn 2s ease 1s both;
+        }
+        .scroll-line {
+            width: 1px; height: 48px;
+            background: linear-gradient(to bottom, rgba(255,255,255,0.4), transparent);
+            animation: scrollPulse 2s ease-in-out infinite;
+        }
+
+        /* SECTION COMMON */
+        section { padding: 120px 48px; }
+        .section-inner { max-width: 1100px; margin: 0 auto; }
+        .section-label {
+            font-family: 'Space Mono', monospace; font-size: 10px;
+            letter-spacing: 4px; text-transform: uppercase;
+            color: var(--accent); margin-bottom: 16px;
+        }
+        .section-title {
+            font-family: 'Playfair Display', serif; font-size: clamp(36px, 5vw, 56px);
+            font-weight: 700; color: var(--text); line-height: 1.15; margin-bottom: 16px;
+        }
+        .section-title em { font-style: italic; color: var(--accent); }
+        .section-desc {
+            font-size: 16px; color: var(--text-secondary); line-height: 1.75;
+            max-width: 560px; margin-bottom: 64px;
+        }
+
+        /* MODES */
+        #Modes { background: var(--off-white); }
+        .modes-tabs {
+            display: flex; gap: 0; border-bottom: 2px solid var(--border);
+            margin-bottom: 48px; overflow-x: auto; overflow-y: hidden;
+            -ms-overflow-style: none; scrollbar-width: none;
+        }
+        .modes-tabs::-webkit-scrollbar { display: none; }
+        .mode-tab {
+            flex: 1; min-width: 140px; padding: 20px 16px;
+            background: none; border: none; cursor: pointer;
+            border-bottom: 3px solid transparent; margin-bottom: -2px;
+            transition: all 0.25s; text-align: center;
+        }
+        .mode-tab:hover { background: var(--light); }
+        .mode-tab.active { border-bottom-color: var(--accent); background: var(--white); }
+        .mode-tab-icon { font-size: 22px; margin-bottom: 8px; }
+        .mode-tab-name {
+            font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 700;
+            letter-spacing: 1px; text-transform: uppercase; color: var(--text-secondary);
+        }
+        .mode-tab.active .mode-tab-name { color: var(--accent); }
+        .mode-tab-sub {
+            font-family: 'Space Mono', monospace; font-size: 9px;
+            color: var(--text-muted); margin-top: 4px; letter-spacing: 1px;
+        }
+        .mode-content { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: start; }
+        .mode-tagline {
+            font-family: 'Playfair Display', serif; font-style: italic;
+            font-size: 28px; color: var(--accent); margin-bottom: 20px; line-height: 1.3;
+        }
+        .mode-desc {
+            font-size: 15px; color: var(--text-secondary); line-height: 1.8; margin-bottom: 32px;
+        }
+        .mode-steps { display: flex; flex-direction: column; gap: 14px; }
+        .mode-step { display: flex; align-items: center; gap: 14px; }
+        .mode-step-icon {
+            width: 40px; height: 40px; border-radius: 10px;
+            background: var(--accent-bg); border: 1px solid var(--accent-border);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 16px; flex-shrink: 0;
+        }
+        .mode-step-label { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
+        .mode-card {
+            background: var(--white); border: 1px solid var(--border);
+            border-radius: 12px; overflow: hidden;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+        }
+        .mode-card-header {
+            padding: 16px 20px; border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; gap: 8px;
+        }
+        .mode-card-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .mode-card-label {
+            font-family: 'Space Mono', monospace; font-size: 9px;
+            letter-spacing: 2px; color: var(--text-muted); margin-left: auto;
+        }
+        .mode-card-body { padding: 24px; }
+        .mode-narration {
+            font-family: 'Playfair Display', serif; font-style: italic;
+            font-size: 16px; color: var(--text); line-height: 1.75;
+            margin-bottom: 20px;
+        }
+        .waveform { display: flex; align-items: center; gap: 3px; height: 28px; }
+        .wave-bar {
+            width: 3px; background: var(--accent); border-radius: 2px; opacity: 0.6;
+            animation: waveform 0.8s ease-in-out infinite;
+        }
+        .mode-feature-badge {
+            margin-top: 20px; padding: 12px 16px;
+            background: var(--accent-bg); border: 1px solid var(--accent-border);
+            border-radius: 8px;
+        }
+        .mode-feature-label {
+            font-family: 'Space Mono', monospace; font-size: 9px;
+            letter-spacing: 2px; color: var(--accent); margin-bottom: 6px;
+        }
+        .mode-feature-text { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+
+        /* EXPERIENCE */
+        #Experience { background: var(--white); }
+        .features-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1px; background: var(--border); border: 1px solid var(--border);
+            border-radius: 12px; overflow: hidden;
+        }
+        .feature-card {
+            background: var(--white); padding: 36px 32px;
+            transition: background 0.2s;
+        }
+        .feature-card:hover { background: var(--off-white); }
+        .feature-icon {
+            width: 48px; height: 48px; border-radius: 12px;
+            background: var(--accent-bg); border: 1px solid var(--accent-border);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 22px; margin-bottom: 20px;
+        }
+        .feature-title {
+            font-size: 15px; font-weight: 700; color: var(--text);
+            margin-bottom: 10px; letter-spacing: 0.2px;
+        }
+        .feature-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.75; margin-bottom: 20px; }
+        .feature-tag {
+            font-family: 'Space Mono', monospace; font-size: 9px;
+            letter-spacing: 2px; color: var(--accent); text-transform: uppercase;
+        }
+
+        /* ARCHITECTURE */
+        #Architecture { background: var(--off-white); }
+        .arch-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: start; }
+        .arch-diagram {
+            background: var(--white); border: 1px solid var(--border);
+            border-radius: 12px; padding: 32px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+        }
+        .arch-diagram-title {
+            font-family: 'Space Mono', monospace; font-size: 10px;
+            letter-spacing: 3px; color: var(--accent); margin-bottom: 28px;
+        }
+        .arch-node {
+            padding: 12px 16px; border-radius: 8px; text-align: center;
+            font-size: 12px; font-weight: 600; color: var(--text);
+            border: 1px solid var(--border); background: var(--off-white);
+            margin-bottom: 0;
+        }
+        .arch-node.primary { background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent); }
+        .arch-connector {
+            width: 1px; height: 24px; background: var(--border-dark);
+            margin: 0 auto;
+        }
+        .arch-row { display: flex; gap: 8px; margin: 0; }
+        .arch-row .arch-node { flex: 1; font-size: 11px; }
+        .arch-row .arch-node.green { background: var(--green-bg); border-color: #b0d4c0; color: var(--green); }
+        .arch-row .arch-node.teal { background: var(--teal-bg); border-color: #a8ccd4; color: var(--teal); }
+        .arch-row .arch-node.gold { background: var(--gold-bg); border-color: #d4c080; color: var(--gold); }
+        .arch-steps { display: flex; flex-direction: column; gap: 28px; }
+        .arch-step { display: flex; gap: 20px; }
+        .arch-step-num {
+            font-family: 'Space Mono', monospace; font-size: 11px;
+            color: var(--accent); width: 28px; flex-shrink: 0; padding-top: 2px;
+        }
+        .arch-step-title { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+        .arch-step-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
+
+        /* STACK */
+        #Stack { background: var(--white); }
+        .stack-category { margin-bottom: 40px; }
+        .stack-cat-label {
+            font-family: 'Space Mono', monospace; font-size: 9px;
+            letter-spacing: 4px; color: var(--text-muted); text-transform: uppercase;
+            padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 12px;
+        }
+        .stack-items { display: flex; flex-direction: column; gap: 2px; }
+        .stack-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 16px 20px; background: var(--off-white);
+            border: 1px solid var(--border); border-radius: 8px;
+            gap: 24px; transition: background 0.2s;
+        }
+        .stack-item:hover { background: var(--light); }
+        .stack-item-left { display: flex; align-items: center; gap: 16px; }
+        .stack-badge {
+            font-family: 'Space Mono', monospace; font-size: 9px;
+            padding: 3px 8px; background: var(--accent-bg);
+            border: 1px solid var(--accent-border); color: var(--accent);
+            letter-spacing: 1px; border-radius: 4px;
+        }
+        .stack-name { font-size: 13px; font-weight: 600; color: var(--text); }
+        .stack-role { font-size: 12px; color: var(--text-muted); text-align: right; }
+
+        /* FOOTER CTA */
+        .footer-cta {
+            margin-top: 100px; padding: 80px 48px;
+            background: var(--text); border-radius: 16px; text-align: center;
+            position: relative; overflow: hidden;
+        }
+        .footer-cta::before {
+            content: ''; position: absolute; inset: 0;
+            background: radial-gradient(ellipse 60% 80% at 50% 0%, rgba(184,114,42,0.25), transparent);
+        }
+        .footer-cta-title {
+            font-family: 'Playfair Display', serif; font-size: clamp(32px, 5vw, 52px);
+            font-weight: 700; color: #fff; line-height: 1.2; margin-bottom: 8px;
+            position: relative;
+        }
+        .footer-cta-title em { font-style: italic; color: var(--accent-light); }
+        .footer-cta-sub {
+            font-family: 'Space Mono', monospace; font-size: 10px;
+            color: var(--accent-light); opacity: 0.8; letter-spacing: 4px; margin-top: 32px;
+        }
+
+        /* ANIMATIONS */
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(28px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes waveform {
+            0%, 100% { height: 4px; }
+            50% { height: 20px; }
+        }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes scrollPulse {
+            0%, 100% { opacity: 0.4; transform: scaleY(1); }
+            50% { opacity: 0.8; transform: scaleY(1.1); }
+        }
+
+        /* RESPONSIVE */
+        @media (max-width: 768px) {
+            nav { padding: 0 20px; }
+            .nav-links { display: none; }
+            section { padding: 80px 20px; }
+            .mode-content { grid-template-columns: 1fr; }
+            .arch-grid { grid-template-columns: 1fr; }
+            .footer-cta { padding: 48px 24px; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav id="navbar">
+    <a class="nav-logo" href="#">
+        <img src="app-icon.png" alt="LORE Icon" class="nav-logo-img">
+        <span class="nav-logo-text">LORE</span>
+    </a>
+    <div class="nav-links">
+        <button class="nav-link active" onclick="scrollToSection('Concept')">Concept</button>
+        <button class="nav-link" onclick="scrollToSection('Modes')">Modes</button>
+        <button class="nav-link" onclick="scrollToSection('Experience')">Experience</button>
+        <button class="nav-link" onclick="scrollToSection('Architecture')">Architecture</button>
+        <button class="nav-link" onclick="scrollToSection('Stack')">Stack</button>
+    </div>
+    <span class="nav-badge">LORE v1.0 — LIVE AGENT</span>
+</nav>
+
+<!-- HERO -->
+<section class="hero" id="Concept">
+    <div class="hero-bg-fallback"></div>
+    <div class="hero-bg"></div>
+    <div class="hero-overlay"></div>
+
+    <div class="hero-content">
+        <div class="hero-eyebrow">
+            <span>◆</span>
+            <span>Gemini Live Agent Challenge 2026</span>
+            <span>◆</span>
+        </div>
+        <h1 class="hero-title">LORE</h1>
+        <div class="hero-subtitle">The World Is Your Documentary</div>
+        <div class="hero-typed" id="typed-text">Point your camera at history...<span style="animation: blink 1s infinite; display:inline-block; color: rgba(232,168,74,0.9);">|</span></div>
+        <p class="hero-desc">
+            Point your camera at any place. Speak any question. LORE generates a living documentary — narrated, illustrated, cinematic — in real time. History has never been this immersive.
+        </p>
+        <div class="hero-cta">
+            <button class="btn-primary" onclick="scrollToSection('Modes')">Explore Modes</button>
+            <button class="btn-outline" onclick="scrollToSection('Architecture')">View Architecture</button>
+        </div>
+    </div>
+
+    <div class="hero-scroll">
+        <div class="scroll-line"></div>
+        <span>Scroll</span>
+    </div>
+</section>
+
+<!-- MODES -->
+<section id="Modes">
+    <div class="section-inner">
+        <div class="section-label">02 — Modes</div>
+        <h2 class="section-title">Four inputs.<br><em>One living documentary.</em></h2>
+        <p class="section-desc">Every way you interact with the world becomes a doorway into history.</p>
+
+        <div class="modes-tabs" id="modes-tabs">
+            <button class="mode-tab active" onclick="setMode(0)">
+                <div class="mode-tab-icon">📷</div>
+                <div class="mode-tab-name">SightMode</div>
+                <div class="mode-tab-sub">Visual Intelligence</div>
+            </button>
+            <button class="mode-tab" onclick="setMode(1)">
+                <div class="mode-tab-icon">🎙️</div>
+                <div class="mode-tab-name">VoiceMode</div>
+                <div class="mode-tab-sub">Conversational DNA</div>
+            </button>
+            <button class="mode-tab" onclick="setMode(2)">
+                <div class="mode-tab-icon">✦</div>
+                <div class="mode-tab-name">LoreMode</div>
+                <div class="mode-tab-sub">The Fusion</div>
+            </button>
+            <button class="mode-tab" onclick="setMode(3)">
+                <div class="mode-tab-icon">📍</div>
+                <div class="mode-tab-name">GPS Tour</div>
+                <div class="mode-tab-sub">Spatial Awareness</div>
+            </button>
+        </div>
+
+        <div id="mode-panel"></div>
+    </div>
+</section>
+
+<!-- EXPERIENCE -->
+<section id="Experience">
+    <div class="section-inner">
+        <div class="section-label">03 — Experience</div>
+        <h2 class="section-title">Features that emerge<br><em>from the fusion.</em></h2>
+        <p class="section-desc">Six capabilities that make LORE unlike anything that came before.</p>
+
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">🧠</div>
+                <div class="feature-title">Gemini Live API</div>
+                <div class="feature-desc">Native multimodal interaction. Gemini hears your voice and sees your camera frames in a single bidirectional stream for sub-second responses.</div>
+                <div class="feature-tag">Live Intelligence</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📽️</div>
+                <div class="feature-title">Google Maps Platform</div>
+                <div class="feature-desc">Places API and Directions API provide the ground truth for your location, ensuring every historical claim is tied to the exact coordinates you stand upon.</div>
+                <div class="feature-tag">Spatial Grounding</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🎞️</div>
+                <div class="feature-title">Veo 3.1 & Gemini 3.1</div>
+                <div class="feature-desc">Cinematic video and high-fidelity illustrations generated on-the-fly to visualize historical events, architectural reconstructions, and alternate futures.</div>
+                <div class="feature-tag">Generative Media</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🎙️</div>
+                <div class="feature-title">Historical Characters</div>
+                <div class="feature-desc">At significant landmarks, LORE narrations shift into dramatic interpretations of the people who shaped history, bringing voices from the past into the present.</div>
+                <div class="feature-tag">Persona Engine</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🌍</div>
+                <div class="feature-title">Alternate History</div>
+                <div class="feature-desc">Ask "What if?" and watch the world transform. Speculative scenarios are grounded in physical visual context through generative fusion.</div>
+                <div class="feature-tag">Lore Exclusive</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <div class="feature-title">Direct Multimodal Flow</div>
+                <div class="feature-desc">A streamlined transparent proxy coordinates between the mobile app and Gemini Live API to ensure zero-friction documentary generation.</div>
+                <div class="feature-tag">High-Performance Bridge</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ARCHITECTURE -->
+<section id="Architecture">
+    <div class="section-inner">
+        <div class="section-label">04 — Architecture</div>
+        <h2 class="section-title">How LORE <em>thinks.</em></h2>
+        <p class="section-desc">A transparent, high-performance pipeline from your senses to the screen.</p>
+
+        <div class="arch-grid">
+            <div class="arch-diagram">
+                <div class="arch-diagram-title">SYSTEM TOPOLOGY</div>
+                <div class="arch-node primary">Flutter Mobile (Frontend)</div>
+                <div class="arch-connector"></div>
+                <div class="arch-node">Gemini Live Proxy — Port 8090</div>
+                <div class="arch-connector"></div>
+                <div class="arch-row">
+                    <div class="arch-node green">Gemini Live API</div>
+                    <div class="arch-node">Image Server<br><small style="font-size:10px;opacity:0.7">Port 8091</small></div>
+                    <div class="arch-node teal">Video Server<br><small style="font-size:10px;opacity:0.7">Port 8092</small></div>
+                </div>
+                <div class="arch-connector"></div>
+                <div class="arch-node gold">Google Cloud Stack — Vertex AI · Cloud Run</div>
+            </div>
+
+            <div class="arch-steps">
+                <div class="arch-step">
+                    <div class="arch-step-num">01</div>
+                    <div>
+                        <div class="arch-step-title">Multimodal Capture</div>
+                        <div class="arch-step-desc">Real-time camera frames and audio stream via WebSocket to the Gemini Live Proxy. Vision and voice are processed concurrently.</div>
+                    </div>
+                </div>
+                <div class="arch-step">
+                    <div class="arch-step-num">02</div>
+                    <div>
+                        <div class="arch-step-title">Spatial Grounding</div>
+                        <div class="arch-step-desc">GPS coordinates and reverse-geocoding provide the location context, ensuring narration is grounded in physical reality.</div>
+                    </div>
+                </div>
+                <div class="arch-step">
+                    <div class="arch-step-num">03</div>
+                    <div>
+                        <div class="arch-step-title">Tool Call Orchestration</div>
+                        <div class="arch-step-desc">Gemini Live API triggers generate_image and generate_video tools, which are executed by the specialized backend servers.</div>
+                    </div>
+                </div>
+                <div class="arch-step">
+                    <div class="arch-step-num">04</div>
+                    <div>
+                        <div class="arch-step-title">Real-time Delivery</div>
+                        <div class="arch-step-desc">Interleaved content is streamed back to the mobile app for an immersive, zero-friction documentary experience.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- STACK -->
+<section id="Stack">
+    <div class="section-inner">
+        <div class="section-label">05 — Tech Stack</div>
+        <h2 class="section-title">Built with the full<br><em>Google Gemini stack.</em></h2>
+        <p class="section-desc">Every layer purpose-chosen for real-time multimodal performance.</p>
+
+        <div class="stack-category">
+            <div class="stack-cat-label">Live Intelligence</div>
+            <div class="stack-items">
+                <div class="stack-item">
+                    <div class="stack-item-left">
+                        <span class="stack-badge">PRIMARY</span>
+                        <span class="stack-name">Gemini 2.5 Flash Live</span>
+                    </div>
+                    <span class="stack-role">Native Audio: vision + audio + session memory</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="stack-category">
+            <div class="stack-cat-label">Generation Layer</div>
+            <div class="stack-items">
+                <div class="stack-item">
+                    <div class="stack-item-left">
+                        <span class="stack-badge">VIDEO</span>
+                        <span class="stack-name">Veo 3.1</span>
+                    </div>
+                    <span class="stack-role">1080p cinematic video generation</span>
+                </div>
+                <div class="stack-item">
+                    <div class="stack-item-left">
+                        <span class="stack-badge">IMAGE</span>
+                        <span class="stack-name">Gemini 3.1 Flash Image</span>
+                    </div>
+                    <span class="stack-role">Rapid high-fidelity image generation</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="stack-category">
+            <div class="stack-cat-label">Spatial & Navigation</div>
+            <div class="stack-items">
+                <div class="stack-item">
+                    <div class="stack-item-left">
+                        <span class="stack-badge">NAV</span>
+                        <span class="stack-name">Google Directions API</span>
+                    </div>
+                    <span class="stack-role">Walking navigation for GPS Walking Tours</span>
+                </div>
+                <div class="stack-item">
+                    <div class="stack-item-left">
+                        <span class="stack-badge">MAP</span>
+                        <span class="stack-name">Google Maps SDK</span>
+                    </div>
+                    <span class="stack-role">Landmark visualization and route rendering</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="stack-category">
+            <div class="stack-cat-label">Infrastructure</div>
+            <div class="stack-items">
+                <div class="stack-item">
+                    <div class="stack-item-left">
+                        <span class="stack-badge">COMPUTE</span>
+                        <span class="stack-name">Google Cloud Run</span>
+                    </div>
+                    <span class="stack-role">Serverless compute hosting the proxy and generation servers</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer-cta">
+            <div class="footer-cta-title">The world has always had stories.</div>
+            <div class="footer-cta-title"><em>LORE just learned to tell them.</em></div>
+            <div class="footer-cta-sub">LORE — GEMINI LIVE AGENT CHALLENGE 2026</div>
+        </div>
+    </div>
+</section>
+
+<script>
+    // --- Typed text effect ---
+    const phrases = [
+        "Point at the Colosseum...",
+        "Ask about the 1918 pandemic...",
+        "Stand where empires fell...",
+        "Hear the voices of history...",
+    ];
+    let pIdx = 0, charIdx = 0, deleting = false;
+    const typedEl = document.getElementById('typed-text');
+
+    function typeLoop() {
+        const current = phrases[pIdx];
+        const cursor = '<span style="animation:blink 1s infinite;display:inline-block;color:rgba(232,168,74,0.9);">|</span>';
+        if (!deleting) {
+            charIdx++;
+            typedEl.innerHTML = current.slice(0, charIdx) + cursor;
+            if (charIdx === current.length) { deleting = true; setTimeout(typeLoop, 1800); return; }
+        } else {
+            charIdx--;
+            typedEl.innerHTML = current.slice(0, charIdx) + cursor;
+            if (charIdx === 0) { deleting = false; pIdx = (pIdx + 1) % phrases.length; }
+        }
+        setTimeout(typeLoop, deleting ? 35 : 55);
+    }
+    setTimeout(typeLoop, 1000);
+
+    // --- Nav scroll spy ---
+    window.addEventListener('scroll', () => {
+        const nav = document.getElementById('navbar');
+        if (window.scrollY > 50) {
+            nav.classList.add('scrolled');
+        } else {
+            nav.classList.remove('scrolled');
+        }
+    });
+    window.dispatchEvent(new Event('scroll'));
+
+    function scrollToSection(id) {
+        document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+        document.querySelectorAll('.nav-link').forEach(b => {
+            b.classList.toggle('active', b.textContent.trim() === id);
+        });
+    }
+
+    const observer = new IntersectionObserver(entries => {
+        entries.forEach(e => {
+            if (e.isIntersecting) {
+                const id = e.target.id;
+                document.querySelectorAll('.nav-link').forEach(b => {
+                    b.classList.toggle('active', b.textContent.trim() === id);
+                });
+            }
+        });
+    }, { threshold: 0.4 });
+    ['Concept','Modes','Experience','Architecture','Stack'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) observer.observe(el);
+    });
+
+    // --- Modes data ---
+    const MODES = [
+        {
+            color: '#b8722a', colorBg: '#fdf5ec', colorBorder: '#f0d4a8',
+            tagline: 'Point. See. Understand.',
+            desc: 'Your camera becomes a portal into history. Point at any monument or building and LORE instantly recognises it via Gemini Live vision and GPS grounding. It begins generating a narrated documentary with high-fidelity illustrations streaming in real time.',
+            steps: [
+                { icon: '📷', label: 'Camera captures live frames (1fps)' },
+                { icon: '🌍', label: 'GPS context grounds the model' },
+                { icon: '🎙️', label: 'Gemini Live streams narration' },
+                { icon: '🖼️', label: 'Gemini 3.1 Flash Image generates imagery' },
+            ],
+            narration: '"You are standing where 40,000 soldiers fought in 1764. The ground beneath you absorbed the blood of three empires..."',
+            feature: 'LIVE VISION — Continuous multimodal recognition fused with authoritative historical data.'
+        },
+        {
+            color: '#3a7a5a', colorBg: '#eef6f1', colorBorder: '#b0d4c0',
+            tagline: 'Speak. Ask. Receive a film.',
+            desc: 'Speak any topic and receive a fully interleaved documentary — narration, generated illustrations, and cinematic video clips — flowing together as a single coherent stream. Interrupt at any time to ask follow-up questions.',
+            steps: [
+                { icon: '🎙️', label: 'User speaks natural question' },
+                { icon: '🧠', label: 'Gemini Live API orchestrates tools' },
+                { icon: '🖼️', label: 'Gemini 3.1 Flash Image generates images' },
+                { icon: '🎞️', label: 'Veo 3.1 generates cinematic clips' },
+            ],
+            narration: '"It began not with a crash, but a whisper. In 2003, a banker in Connecticut created a product that would — in five years — bring the world to its knees..."',
+            feature: 'INSTANT DOCS — Transform any spoken topic into a cinematic narrative with no preparation.'
+        },
+        {
+            color: '#8a6a1a', colorBg: '#faf4e4', colorBorder: '#d4c080',
+            tagline: 'See + Ask = Something New.',
+            desc: 'The ultimate breakthrough: Camera AND voice simultaneously. LORE sees where you are AND hears your question — then generates a response that fuses both. This unlocks Alternate History scenarios grounded in your real location.',
+            steps: [
+                { icon: '📷', label: 'Camera streams visual context' },
+                { icon: '🗣️', label: 'Voice question adds intent' },
+                { icon: '⚡', label: 'Gemini fuses both inputs' },
+                { icon: '✨', label: 'Reality + imagination combined' },
+            ],
+            narration: '"Standing at the Colosseum, you ask: what if Rome never fell? LORE generates an alternate-history film shot against your real backdrop."',
+            feature: 'ALTERNATE HISTORY — Ground any historical "what if?" in the real place you\'re standing for maximum immersive impact.'
+        },
+        {
+            color: '#2a6a7a', colorBg: '#eef4f6', colorBorder: '#a8ccd4',
+            tagline: 'Walk. Discover. Listen.',
+            desc: 'Experience the history of your city as you walk through it. LORE tracks your position and auto-triggers narrations when you move significantly or approach a landmark. Includes full Google Directions navigation.',
+            steps: [
+                { icon: '📍', label: 'GPS tracks real-time location' },
+                { icon: '🗺️', label: 'Maps SDK identifies landmarks' },
+                { icon: '↪️', label: 'Directions API guides your path' },
+                { icon: '🎙️', label: 'Auto-triggers on significant movement' },
+            ],
+            narration: '"As you approach the fountain, notice the marks on the central pillar. These were left during the Great Fire of 1888..."',
+            feature: 'HANDS-FREE DISCOVERY — The world narrates itself to you as you move, with landmarks automatically appearing on your map.'
+        }
+    ];
+
+    let activeMode = 0;
+
+    function renderMode(i) {
+        const m = MODES[i];
+        const stepsHtml = m.steps.map(s => `
+            <div class="mode-step">
+                <div class="mode-step-icon" style="background:${m.colorBg};border-color:${m.colorBorder}">${s.icon}</div>
+                <div class="mode-step-label">${s.label}</div>
+            </div>
+        `).join('');
+
+        const waveBars = Array.from({length: 24}, (_, j) => {
+            const dur = (0.4 + Math.random() * 0.8).toFixed(2);
+            const delay = (Math.random() * 0.5).toFixed(2);
+            return `<div class="wave-bar" style="background:${m.color};animation-duration:${dur}s;animation-delay:${delay}s;height:${4 + Math.floor(Math.random()*16)}px"></div>`;
+        }).join('');
+
+        document.getElementById('mode-panel').innerHTML = `
+            <div class="mode-content">
+                <div>
+                    <div class="mode-tagline" style="color:${m.color}">${m.tagline}</div>
+                    <p class="mode-desc">${m.desc}</p>
+                    <div class="mode-steps">${stepsHtml}</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:20px">
+                    <div class="mode-card">
+                        <div class="mode-card-header">
+                            <div class="mode-card-dot" style="background:#e74c3c"></div>
+                            <div class="mode-card-dot" style="background:#f39c12;margin-left:6px"></div>
+                            <div class="mode-card-dot" style="background:#2ecc71;margin-left:6px"></div>
+                            <div class="mode-card-label">▶ SAMPLE NARRATION OUTPUT</div>
+                        </div>
+                        <div class="mode-card-body">
+                            <div class="mode-narration">${m.narration}</div>
+                            <div class="waveform">${waveBars}</div>
+                        </div>
+                    </div>
+                    <div class="mode-feature-badge" style="background:${m.colorBg};border-color:${m.colorBorder}">
+                        <div class="mode-feature-label" style="color:${m.color}">✦ SIGNATURE FEATURE</div>
+                        <div class="mode-feature-text">${m.feature}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function setMode(i) {
+        activeMode = i;
+        document.querySelectorAll('.mode-tab').forEach((t, j) => t.classList.toggle('active', j === i));
+        renderMode(i);
+    }
+
+    renderMode(0);
+</script>
+</body>
+</html>

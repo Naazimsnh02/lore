@@ -28,9 +28,20 @@ from websockets.exceptions import ConnectionClosed
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env from project root
-_env_path = Path(__file__).resolve().parents[3] / ".env"
-load_dotenv(_env_path)
+# Load .env from project root if it exists
+def _load_env():
+    # 1. Check current directory
+    # 2. Check up to 4 levels up (for local dev backend/services/gemini_live_proxy/server.py -> lore/.env)
+    current = Path(__file__).resolve()
+    for _ in range(5):
+        env_path = current.parent / ".env"
+        if env_path.exists():
+            load_dotenv(env_path)
+            return
+        current = current.parent
+        if current == current.parent: # reached root
+            break
+_load_env()
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "WARNING"),
@@ -40,7 +51,7 @@ logging.basicConfig(
 logging.getLogger("websockets").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-WS_PORT = int(os.getenv("GEMINI_PROXY_PORT", "8090"))
+WS_PORT = int(os.getenv("GEMINI_PROXY_PORT") or os.getenv("PORT") or "8090")
 USE_VERTEX = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "false").lower() == "true"
 GCP_PROJECT = os.getenv("GCP_PROJECT_ID", "")
 VERTEX_LOCATION = os.getenv("VERTEX_AI_LOCATION", "us-central1")

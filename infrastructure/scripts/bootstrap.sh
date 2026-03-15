@@ -46,6 +46,9 @@ gcloud services enable \
   secretmanager.googleapis.com \
   places.googleapis.com \
   maps-backend.googleapis.com \
+  maps-android-backend.googleapis.com \
+  maps-ios-backend.googleapis.com \
+  directions-backend.googleapis.com \
   logging.googleapis.com \
   monitoring.googleapis.com \
   iam.googleapis.com \

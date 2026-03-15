@@ -19,7 +19,18 @@ from pathlib import Path
 from aiohttp import web
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parents[3] / ".env")
+# Load .env from project root if it exists
+def _load_env():
+    current = Path(__file__).resolve()
+    for _ in range(5):
+        env_path = current.parent / ".env"
+        if env_path.exists():
+            load_dotenv(env_path)
+            return
+        current = current.parent
+        if current == current.parent:
+            break
+_load_env()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s — %(message)s")
 logger = logging.getLogger(__name__)
@@ -32,7 +43,7 @@ GCP_PROJECT = os.getenv("GCP_PROJECT_ID", "")
 VERTEX_LOCATION = os.getenv("VERTEX_AI_LOCATION", "us-central1")
 
 MODEL_ID = os.getenv("VEO_MODEL", "veo-3.1-generate-preview")
-PORT = int(os.getenv("VIDEO_SERVER_PORT", "8092"))
+PORT = int(os.getenv("VIDEO_SERVER_PORT") or os.getenv("PORT") or "8092")
 
 
 def _make_client():

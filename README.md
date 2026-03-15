@@ -1,31 +1,103 @@
-# LORE — The World Is Your Documentary
+<div align="center">
 
-> Transform physical locations and spoken topics into real-time, AI-generated documentaries
+<img src="landing-page/app-icon.png" width="80" alt="LORE icon" />
 
-LORE is a multimodal AI app that creates immersive documentary experiences by combining live camera vision, conversational AI, video generation, and search-grounded facts — powered by Google's Gemini Live API.
+# LORE
+
+### The World Is Your Documentary
+
+[![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
+[![Gemini Live](https://img.shields.io/badge/Gemini_Live_API-2.5_Flash-4285F4?logo=google&logoColor=white)](https://ai.google.dev)
+[![Veo](https://img.shields.io/badge/Veo-3.1-EA4335?logo=google&logoColor=white)](https://deepmind.google/technologies/veo)
+[![Cloud Run](https://img.shields.io/badge/Cloud_Run-Deployed-4285F4?logo=googlecloud&logoColor=white)](https://cloud.google.com/run)
+[![Vertex AI](https://img.shields.io/badge/Vertex_AI-Enabled-34A853?logo=googlecloud&logoColor=white)](https://cloud.google.com/vertex-ai)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+
+**[🌐 Live Demo](https://lore-landing-page-2we3jhrqzq-uc.a.run.app)**
+
+Point your camera at any place. Speak any question. LORE generates a living documentary — narrated, illustrated, cinematic — in real time. History has never been this immersive.
+
+*Built for the Gemini Live Agent Challenge 2026.*
+
+</div>
 
 ---
 
 ## Modes
 
-| Mode | What it does |
-|------|-------------|
-| SightMode | Point your camera at a landmark — Gemini narrates what it sees in real time |
-| VoiceMode | Speak any topic — get narration, AI-generated images, and Veo video clips |
-| LoreMode | Camera + voice + GPS fusion — full documentary with location awareness |
-| GPS Walking Tour | Walk around a city — Gemini auto-discovers landmarks and narrates as you move |
+LORE offers four distinct ways to experience the world as a documentary.
+
+### 📷 SightMode — Point. See. Understand.
+Point your camera at any monument or building and LORE instantly recognises it via Gemini Live vision and GPS grounding. It begins generating a narrated documentary with high-fidelity illustrations streaming in real time.
+
+- Camera captures live frames at 1fps
+- GPS context grounds the model to your exact location
+- Gemini Live streams narration audio
+- Gemini 3.1 Flash Image generates documentary-style illustrations
+
+### 🎙️ VoiceMode — Speak. Ask. Receive a film.
+Speak any topic and receive a fully interleaved documentary — narration, generated illustrations, and cinematic video clips — flowing together as a single coherent stream. Interrupt at any time to ask follow-up questions.
+
+- Natural voice conversation with Gemini Live
+- Automatic image generation after every visually rich narration
+- Veo 3.1 cinematic video clips on demand
+- Full session history with persistent chat
+
+### ✦ LoreMode — See + Ask = Something New.
+Camera AND voice simultaneously. LORE sees where you are AND hears your question — then generates a response that fuses both. This unlocks Alternate History scenarios grounded in your real location.
+
+- Simultaneous camera + voice input
+- Gemini fuses visual context with spoken intent
+- Alternate history scenarios grounded in your real backdrop
+- The signature LORE experience
+
+### 📍 GPS Walking Tour — Walk. Discover. Listen.
+Experience the history of your city as you walk through it. LORE tracks your position and auto-triggers narrations when you approach a landmark. Includes full Google Directions navigation.
+
+- Real-time GPS tracking with landmark detection
+- Auto-triggered narrations on significant movement
+- Google Directions API for walking navigation
+- Hands-free — the world narrates itself as you move
 
 ---
 
 ## Architecture
 
-### Backend (3 active services)
+```
+Flutter Mobile App
+        │
+        │  WebSocket (wss://)
+        ▼
+┌─────────────────────────────┐
+│   Gemini Live Proxy         │  ← Transparent bidirectional WebSocket proxy
+│   Cloud Run · Port 8090     │    Handles ADC token refresh for Vertex AI
+└──────────┬──────────────────┘
+           │
+     ┌─────┴──────┐
+     ▼            ▼
+Gemini Live    Tool Calls
+   API         │        │
+(Vertex AI)    ▼        ▼
+          Image Srv  Video Srv
+          Port 8091  Port 8092
+          Gemini 3.1 Veo 3.1
+```
 
-```
-gemini_live_proxy  :8090  — WebSocket proxy to Gemini Live API (all 4 modes)
-nano_illustrator   :8091  — HTTP image generation (VoiceMode + LoreMode)
-veo_generator      :8092  — HTTP video generation (VoiceMode)
-```
+### Backend Services (Cloud Run)
+
+| Service | Description | Port |
+|---------|-------------|------|
+| `lore-gemini-proxy` | WebSocket proxy to Gemini Live API — used by all 4 modes | 8090 |
+| `lore-nano-illustrator` | HTTP image generation via Gemini 3.1 Flash Image | 8091 |
+| `lore-veo-generator` | HTTP video generation via Veo 3.1 | 8092 |
+| `lore-landing-page` | Static landing page served via nginx | 8080 |
+
+### How it works
+
+1. **Multimodal Capture** — Real-time camera frames and audio stream via WebSocket to the Gemini Live Proxy. Vision and voice are processed concurrently.
+2. **Spatial Grounding** — GPS coordinates and reverse-geocoding provide location context, ensuring narration is grounded in physical reality.
+3. **Tool Call Orchestration** — Gemini Live API triggers `generate_image` and `generate_video` tools, executed by the specialized backend servers.
+4. **Real-time Delivery** — Interleaved audio, text, images, and video stream back to the mobile app.
 
 ### Mobile (Flutter)
 
@@ -41,13 +113,34 @@ services/
   camera_service.dart        — camera frame capture
 ```
 
-### AI Models
+---
 
-| Role | Model |
-|------|-------|
-| Live narration (all modes) | `gemini-2.5-flash-native-audio-preview-12-2025` |
-| Image generation | `gemini-3.1-flash-image-preview` |
-| Video generation | `veo-3.1-generate-preview` |
+## Tech Stack
+
+### Live Intelligence
+| Model | Role |
+|-------|------|
+| `gemini-2.5-flash-native-audio-preview-12-2025` (AI Studio) | Real-time narration — vision + audio + session memory |
+| `gemini-live-2.5-flash-native-audio` (Vertex AI) | Same, production grade with audio output |
+
+### Generation Layer
+| Model | Role |
+|-------|------|
+| `veo-3.1-generate-preview` | 1080p cinematic video generation |
+| `gemini-3.1-flash-image-preview` | Rapid high-fidelity image generation |
+
+### Spatial & Navigation
+| Service | Role |
+|---------|------|
+| Google Maps SDK | Landmark visualisation and route rendering |
+| Google Directions API | Walking navigation for GPS Walking Tours |
+
+### Infrastructure
+| Service | Role |
+|---------|------|
+| Google Cloud Run | Serverless compute hosting proxy and generation servers |
+| Vertex AI | Production AI platform with ADC-based auth |
+| Google Cloud Build | Container image builds |
 
 ---
 
@@ -65,16 +158,16 @@ services/
 
 ```bash
 cp .env.example .env
-# Fill in GEMINI_API_KEY, GOOGLE_MAPS_API_KEY
+# Fill in GEMINI_API_KEY and GOOGLE_MAPS_API_KEY
 ```
 
-### 2. Start backend services (3 terminals from project root)
+### 2. Start backend services
 
 ```powershell
 # Terminal 1 — Gemini Live proxy (required for all modes)
 python backend/services/gemini_live_proxy/server.py
 
-# Terminal 2 — Image server (VoiceMode + LoreMode)
+# Terminal 2 — Image server (SightMode, VoiceMode, LoreMode)
 python backend/services/nano_illustrator/image_server.py
 
 # Terminal 3 — Video server (VoiceMode)
@@ -92,11 +185,7 @@ Create `mobile/dart-defines.json`:
 }
 ```
 
-Add to `mobile/android/local.properties`:
-
-```properties
-GOOGLE_MAPS_API_KEY=<your-maps-api-key>
-```
+> Use your machine's LAN IP instead of `10.0.2.2` when running on a physical device.
 
 ### 4. Run the app
 
@@ -106,68 +195,86 @@ flutter pub get
 flutter run --dart-define-from-file=dart-defines.json
 ```
 
-> Use your machine's LAN IP instead of `10.0.2.2` when running on a physical device.
+---
+
+## Cloud Deployment
+
+### Bootstrap (first time only)
+
+```powershell
+.\infrastructure\scripts\bootstrap.ps1 -ProjectId <your-project-id>
+```
+
+### Deploy all services
+
+```powershell
+.\infrastructure\scripts\deploy.ps1 -ProjectId <your-project-id> -Vertex
+```
+
+### Deploy landing page
+
+```powershell
+.\landing-page\deploy-landing.ps1 -ProjectId <your-project-id>
+```
+
+### Deployed endpoints (production)
+
+```
+lore-gemini-proxy     wss://lore-gemini-proxy-2we3jhrqzq-uc.a.run.app
+lore-nano-illustrator https://lore-nano-illustrator-2we3jhrqzq-uc.a.run.app/generate
+lore-veo-generator    https://lore-veo-generator-2we3jhrqzq-uc.a.run.app/generate
+lore-landing-page     https://lore-landing-page-2we3jhrqzq-uc.a.run.app
+```
+
+After deploying, rebuild the app:
+
+```bash
+cd mobile && flutter build apk --dart-define-from-file=dart-defines.json
+```
+
+### Cleanup (post-hackathon)
+
+```powershell
+# Deletes Cloud Run services and service account
+.\infrastructure\scripts\cleanup.ps1 -ProjectId <your-project-id>
+
+# Full teardown including GCR images and Cloud Build bucket
+.\infrastructure\scripts\cleanup.ps1 -ProjectId <your-project-id> -Nuke
+```
 
 ---
 
-## Setup & Deployment
+## AI Studio vs Vertex AI
 
-See [`SETUP.md`](SETUP.md) for the full guide including:
-- Cloud Run deployment for all 4 services
-- Secret Manager setup
-- Production dart-defines configuration
-- Pre-publish checklist
+LORE supports both modes. Switch by editing two files:
 
-### Services deployed to Cloud Run
-
+**`mobile/dart-defines.json`**
+```json
+{
+  "GOOGLE_GENAI_USE_VERTEXAI": "true",
+  "GCP_PROJECT_ID": "your-project-id"
+}
 ```
-lore-gemini-proxy        — wss://lore-gemini-proxy-HASH-uc.a.run.app
-lore-nano-illustrator    — https://lore-nano-illustrator-HASH-uc.a.run.app
-lore-veo-generator       — https://lore-veo-generator-HASH-uc.a.run.app
+
+**`.env`**
+```bash
+GOOGLE_GENAI_USE_VERTEXAI=true
 ```
+
+> After changing `dart-defines.json` you must do a full rebuild: `flutter run --dart-define-from-file=dart-defines.json`
+
+| Feature | AI Studio | Vertex AI |
+|---------|-----------|-----------|
+| Veo video with audio | ✗ | ✓ |
+| Free tier | ✓ | ✗ |
+| Production scale | ✗ | ✓ |
+| Auth | API key | ADC / Service Account |
 
 ---
 
 ## Notes
 
-- **Veo video with audio** requires Vertex AI (`GOOGLE_GENAI_USE_VERTEXAI=true`). AI Studio produces video without audio.
 - **GPS mode** requires a physical device — emulator GPS is unreliable.
 - **Local dev** uses AI Studio by default. Do not set `GCP_PROJECT_ID` in `dart-defines.json` for local dev.
 - The Maps API key appears in `AndroidManifest.xml` by design (required by Maps SDK) — restrict it by Android app signature in GCP Console.
-
----
-
-## Switching AI Modes (AI Studio vs Vertex AI)
-
-LORE supports both **Google AI Studio** (for fast local prototyping) and **Vertex AI** (for production-grade features like Veo video with audio). Switching between them only requires touching two files:
-
-### 1. Flutter (`mobile/dart-defines.json`)
-```json
-{
-  "GOOGLE_GENAI_USE_VERTEXAI": "true",   // Use "false" for AI Studio
-  "GCP_PROJECT_ID": "your-project-id"    // Omit or leave empty for AI Studio
-}
-```
-*Note: After changing `dart-defines.json`, you MUST perform a full rebuild: `flutter run --dart-define-from-file=dart-defines.json`.*
-
-### 2. Backend (`.env`)
-```bash
-GOOGLE_GENAI_USE_VERTEXAI=true   # or false
-
-# Use the appropriate model ID for the selected mode:
-# Vertex AI:
-GEMINI_LIVE_MODEL=gemini-live-2.5-flash-native-audio
-# AI Studio:
-# GEMINI_LIVE_MODEL=gemini-2.5-flash-native-audio-preview-12-2025
-```
-
----
-
-## Tech Stack
-
-- **Gemini Live API** — real-time bidirectional audio/video/text streaming
-- **Veo 3.1** — cinematic video generation
-- **Flutter** — iOS + Android
-- **FastAPI + uvicorn** — WebSocket proxy
-- **Google Cloud Run** — auto-scaling serverless backend
-- **Google Maps Platform** — GPS walking tour map + directions
+- See [`SETUP.md`](SETUP.md) for the full deployment guide including Secret Manager setup and pre-publish checklist.

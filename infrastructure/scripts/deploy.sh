@@ -125,12 +125,24 @@ if [[ "${SERVICE}" == "all" ]]; then
     --format 'value(status.url)' \
     --project "${PROJECT_ID}" 2>/dev/null || echo "wss://lore-gemini-proxy-HASH-uc.a.run.app")
 
+  IMAGE_URL=$(gcloud run services describe "lore-nano-illustrator" \
+    --region "${REGION}" \
+    --format 'value(status.url)' \
+    --project "${PROJECT_ID}" 2>/dev/null || echo "https://lore-nano-illustrator-HASH-uc.a.run.app")
+
+  VIDEO_URL=$(gcloud run services describe "lore-veo-generator" \
+    --region "${REGION}" \
+    --format 'value(status.url)' \
+    --project "${PROJECT_ID}" 2>/dev/null || echo "https://lore-veo-generator-HASH-uc.a.run.app")
+
   echo "==> All services deployed."
   echo ""
   echo "Update mobile/dart-defines.json for production:"
   echo ""
   echo "  {"
   echo "    \"GEMINI_PROXY_URL\": \"${PROXY_URL/https/wss}\","
+  echo "    \"NANO_ILLUSTRATOR_URL\": \"${IMAGE_URL}/generate\","
+  echo "    \"VEO_GENERATOR_URL\": \"${VIDEO_URL}/generate\","
   echo "    \"GCP_PROJECT_ID\": \"${PROJECT_ID}\","
   echo "    \"GOOGLE_MAPS_API_KEY\": \"<your-maps-api-key>\","
   echo "    \"GOOGLE_GENAI_USE_VERTEXAI\": \"${USE_VERTEX}\""

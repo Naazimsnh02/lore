@@ -32,6 +32,21 @@ String get _kDefaultProxyUrl {
 const String _kProjectId = String.fromEnvironment('GCP_PROJECT_ID', defaultValue: '');
 const bool _kUseVertexAI = String.fromEnvironment('GOOGLE_GENAI_USE_VERTEXAI', defaultValue: 'false') == 'true';
 
+const String _kIllustratorUrlOverride = String.fromEnvironment('NANO_ILLUSTRATOR_URL', defaultValue: '');
+const String _kVideoGeneratorUrlOverride = String.fromEnvironment('VEO_GENERATOR_URL', defaultValue: '');
+
+String get _kIllustratorUrl {
+  if (_kIllustratorUrlOverride.isNotEmpty) return _kIllustratorUrlOverride;
+  final host = Uri.parse(_kDefaultProxyUrl).host;
+  return 'http://$host:8091/generate';
+}
+
+String get _kVideoGeneratorUrl {
+  if (_kVideoGeneratorUrlOverride.isNotEmpty) return _kVideoGeneratorUrlOverride;
+  final host = Uri.parse(_kDefaultProxyUrl).host;
+  return 'http://$host:8092/generate';
+}
+
 // Vertex AI and AI Studio use different model IDs for the Live API
 const String _kModelVertex = 'gemini-live-2.5-flash-native-audio';
 const String _kModelAIStudio = 'gemini-2.5-flash-native-audio-preview-12-2025';
@@ -409,10 +424,9 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen> with Ti
   }
 
   Future<void> _runGenerateImage(String callId, String prompt, String loadingId) async {
-    final host = Uri.parse(_kDefaultProxyUrl).host;
     try {
       final resp = await http.post(
-        Uri.parse('http://$host:8091/generate'),
+        Uri.parse(_kIllustratorUrl),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'prompt': prompt}),
       ).timeout(const Duration(seconds: 60));
@@ -440,10 +454,9 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen> with Ti
   }
 
   Future<void> _runGenerateVideo(String callId, String prompt, String loadingId) async {
-    final host = Uri.parse(_kDefaultProxyUrl).host;
     try {
       final resp = await http.post(
-        Uri.parse('http://$host:8092/generate'),
+        Uri.parse(_kVideoGeneratorUrl),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'prompt': prompt}),
       ).timeout(const Duration(minutes: 4));
