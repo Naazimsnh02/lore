@@ -48,18 +48,90 @@ _CORS = {
 }
 
 
-def _extract_url(operation) -> str | None:
-    """Try every known attribute path to get the video URL."""
+def _gcs_to_signed_url(gcs_uri: str) -> str | None:
+    """Convert a gs://bucket/object URI to a short-lived signed HTTPS URL."""
     try:
-        videos = operation.response.generated_videos
-        if not videos:
+        from google.cloud import storage
+        # gs://bucket/path/to/object
+        without_scheme = gcs_uri[len("gs://"):]
+        bucket_name, _, blob_name = without_scheme.partition("/")
+        client = storage.Client(project=GCP_PROJECT)
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_name)
+        import datetime
+        url = blob.generate_signed_url(
+            version="v4",
+            expiration=datetime.timedelta(hours=1),
+            method="GET",
+        )
+        return url
+    except Exception as e:
+        print(f"  _gcs_to_signed_url error: {e}")
+        return None
+
+
+def _extract_url(operation) -> str | None:
+    """Extract video URL from a completed GenerateVideosOperation.
+
+    Handles two Vertex AI response shapes:
+      - URI present: returns the GCS/HTTPS URI string
+      - video_bytes present (no output GCS bucket configured): returns a
+        data URI so the caller can serve the bytes directly
+    """
+    import base64
+
+    try:
+        raw = getattr(operation, "__dict__", {})
+
+        # Check for error first
+        raw_error = raw.get("error")
+        if raw_error:
+            print(f"  _extract_url: operation has error: {raw_error}")
             return None
-        v = videos[0]
-        video_obj = getattr(v, "video", v)
-        for attr in ("uri", "url", "video_uri", "download_uri"):
-            val = getattr(video_obj, attr, None)
-            if val:
-                return str(val)
+
+        # Vertex AI puts generated_videos inside raw['response'] as a dict
+        raw_response = raw.get("response") or {}
+        if isinstance(raw_response, dict):
+            raw_videos = raw_response.get("generated_videos", [])
+        else:
+            raw_videos = getattr(raw_response, "generated_videos", None) or []
+
+        if not raw_videos:
+            print(f"  _extract_url: no generated_videos. raw keys={list(raw.keys())}, response={raw_response}")
+            return None
+
+        v = raw_videos[0]
+
+        def _resolve_video_obj(entry):
+            """Return the innermost video object whether entry is dict or namespace."""
+            if isinstance(entry, dict):
+                return entry.get("video") or entry
+            return getattr(entry, "video", entry)
+
+        video_obj = _resolve_video_obj(v)
+
+        # --- Try URI first ---
+        if isinstance(video_obj, dict):
+            for key in ("uri", "url", "video_uri", "download_uri", "gcs_uri"):
+                val = video_obj.get(key)
+                if val:
+                    return str(val)
+            # Fallback: raw bytes returned by Vertex AI when no GCS bucket set
+            raw_bytes = video_obj.get("video_bytes")
+            mime = video_obj.get("mime_type", "video/mp4")
+        else:
+            for attr in ("uri", "url", "video_uri", "download_uri", "gcs_uri"):
+                val = getattr(video_obj, attr, None)
+                if val:
+                    return str(val)
+            raw_bytes = getattr(video_obj, "video_bytes", None)
+            mime = getattr(video_obj, "mime_type", "video/mp4") or "video/mp4"
+
+        if raw_bytes:
+            encoded = base64.b64encode(raw_bytes).decode("ascii")
+            return f"data:{mime};base64,{encoded}"
+
+        print(f"  _extract_url: no uri found in video object: video={video_obj}")
     except Exception as e:
         print(f"  _extract_url error: {e}")
     return None
@@ -112,9 +184,19 @@ async def handle_generate(request: web.Request) -> web.Response:
 
         url = _extract_url(operation)
         if url:
-            # Append API key so the Flutter video player can download without auth headers
-            sep = "&" if "?" in url else "?"
-            playable_url = f"{url}{sep}key={GEMINI_API_KEY}"
+            if USE_VERTEX and url.startswith("gs://"):
+                # Vertex AI returned a GCS URI — generate a signed download URL
+                playable_url = _gcs_to_signed_url(url)
+                if not playable_url:
+                    return web.json_response({"error": "Failed to sign GCS URL"}, status=500, headers=_CORS)
+            elif url.startswith("data:"):
+                # Vertex AI returned raw bytes (no GCS output bucket configured)
+                # Serve the data URI directly — Flutter video_player can handle it
+                playable_url = url
+            else:
+                # AI Studio: append API key so Flutter video player can download without auth headers
+                sep = "&" if "?" in url else "?"
+                playable_url = f"{url}{sep}key={GEMINI_API_KEY}"
             print(f"Video ready: {url[:80]}")
             return web.json_response({"video_url": playable_url, "duration": 8}, headers=_CORS)
 
@@ -130,8 +212,8 @@ async def handle_generate(request: web.Request) -> web.Response:
 
 
 async def main():
-    if not GEMINI_API_KEY:
-        print("ERROR: GEMINI_API_KEY not set in .env")
+    if not USE_VERTEX and not GEMINI_API_KEY:
+        print("ERROR: GEMINI_API_KEY not set in .env (required for AI Studio mode)")
         return
 
     print(f"Model: {MODEL_ID}")

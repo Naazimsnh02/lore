@@ -48,10 +48,16 @@ String get _kDefaultProxyUrl {
 
 const String _kProjectId =
     String.fromEnvironment('GCP_PROJECT_ID', defaultValue: '');
-const String _kModel = 'gemini-2.5-flash-native-audio-preview-12-2025';
+const String _kMapsApiKey =
+    String.fromEnvironment('GOOGLE_MAPS_API_KEY', defaultValue: '');
+const bool _kUseVertexAI = String.fromEnvironment('GOOGLE_GENAI_USE_VERTEXAI', defaultValue: 'false') == 'true';
+
+const String _kModelVertex = 'gemini-live-2.5-flash-native-audio';
+const String _kModelAIStudio = 'gemini-2.5-flash-native-audio-preview-12-2025';
+String get _kModel => _kUseVertexAI ? _kModelVertex : _kModelAIStudio;
 
 String get _modelUri {
-  if (_kProjectId.isNotEmpty) {
+  if (_kUseVertexAI && _kProjectId.isNotEmpty) {
     return 'projects/$_kProjectId/locations/us-central1/publishers/google/models/$_kModel';
   }
   return 'models/$_kModel';
@@ -324,9 +330,6 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
   bool _lastAssistantMsgFinished = true;
   bool _showTranscript = true;
 
-  // ── Location ───────────────────────────────────────────────────────────────
-  String? _recognisedLocation;
-
   // ── Animation ─────────────────────────────────────────────────────────────
   late AnimationController _pulseCtrl;
 
@@ -427,31 +430,20 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
 
     _gpsSub = Geolocator.getPositionStream(locationSettings: settings).listen(
       (pos) {
+        final prev = _lastPosition;
         _lastPosition = pos;
         _gpsLostTimer?.cancel();
         if (mounted && !_disposed && _gpsLost) {
           setState(() => _gpsLost = false);
         }
-        // Inject GPS context into the live session as a silent text turn
         if (_connected) {
-          _wsSend({
-            'client_content': {
-              'turns': [
-                {
-                  'role': 'user',
-                  'parts': [
-                    {
-                      'text':
-                          '[GPS: lat=${pos.latitude.toStringAsFixed(5)}, '
-                              'lon=${pos.longitude.toStringAsFixed(5)}, '
-                              'accuracy=${pos.accuracy.toStringAsFixed(0)}m]'
-                    }
-                  ]
-                }
-              ],
-              'turn_complete': false,
-            }
-          });
+          final movedSignificantly = prev == null ||
+              Geolocator.distanceBetween(prev.latitude, prev.longitude,
+                      pos.latitude, pos.longitude) >
+                  30;
+          if (prev == null || movedSignificantly) {
+            _sendGpsContext(pos);
+          }
         }
       },
       onError: (_) {
@@ -463,6 +455,66 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
     _gpsLostTimer = Timer(const Duration(seconds: 10), () {
       if (_lastPosition == null && mounted && !_disposed) {
         setState(() => _gpsLost = true);
+      }
+    });
+  }
+
+  Future<String?> _reverseGeocode(Position pos) async {
+    if (_kMapsApiKey.isNotEmpty) {
+      try {
+        final url = Uri.parse(
+          'https://maps.googleapis.com/maps/api/geocode/json'
+          '?latlng=${pos.latitude},${pos.longitude}&key=$_kMapsApiKey',
+        );
+        final resp = await http.get(url).timeout(const Duration(seconds: 5));
+        if (resp.statusCode == 200) {
+          final data = json.decode(resp.body) as Map<String, dynamic>;
+          if (data['status'] == 'OK') {
+            final results = data['results'] as List<dynamic>;
+            if (results.isNotEmpty) {
+              return (results.first as Map<String, dynamic>)['formatted_address']
+                  as String?;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+    // Fallback: OpenStreetMap Nominatim
+    try {
+      final url = Uri.parse(
+        'https://nominatim.openstreetmap.org/reverse'
+        '?lat=${pos.latitude}&lon=${pos.longitude}&format=json',
+      );
+      final resp = await http
+          .get(url, headers: {'User-Agent': 'LoreLoreMode/1.0'}).timeout(
+        const Duration(seconds: 5),
+      );
+      if (resp.statusCode == 200) {
+        final data = json.decode(resp.body) as Map<String, dynamic>;
+        return data['display_name'] as String?;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> _sendGpsContext(Position pos) async {
+    final address = await _reverseGeocode(pos);
+    final addressPart = address != null ? ', address="$address"' : '';
+    final tag = '[GPS: lat=${pos.latitude.toStringAsFixed(5)}, '
+        'lon=${pos.longitude.toStringAsFixed(5)}, '
+        'accuracy=${pos.accuracy.toStringAsFixed(0)}m$addressPart]';
+    if (!_connected || _disposed) return;
+    _wsSend({
+      'client_content': {
+        'turns': [
+          {
+            'role': 'user',
+            'parts': [
+              {'text': tag}
+            ]
+          }
+        ],
+        'turn_complete': false,
       }
     });
   }
@@ -561,74 +613,50 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
           'parts': [
             {
               'text':
-                  'You are LORE — an immersive AI documentary narrator and expert guide. '
-                  'You have access to a live camera feed AND the user\'s voice simultaneously. '
-                  'You also receive GPS coordinates as [GPS: lat=..., lon=..., accuracy=...m] '
-                  'context messages — use these to enrich your narration with precise location awareness.\n\n'
-                  'YOUR CORE BEHAVIOUR:\n'
-                  'You combine what you SEE through the camera with what the user SAYS to deliver '
-                  'rich, cinematic documentary narration — as if they are watching a BBC or '
-                  'National Geographic film about the exact place they are standing in. '
-                  'Lead with identity and significance. Name the subject confidently. '
-                  'Deliver the most compelling facts, history, and context a knowledgeable '
-                  'local expert or historian would share.\n\n'
-                  'WHAT TO COVER (pick the most relevant):\n'
-                  '- Landmarks & buildings: name, age, who built it and why, architectural style, '
-                  'historical events, cultural significance, interesting stories.\n'
-                  '- Natural features: geological formation, ecological significance, local legends.\n'
-                  '- Art & sculptures: artist, period, technique, symbolism, the story behind it.\n'
-                  '- Streets & neighbourhoods: historical name changes, famous residents, key events.\n\n'
-                  'ALTERNATE HISTORY:\n'
-                  'When the user asks "what if", "imagine if", "suppose", or any alternate history '
-                  'question — engage fully and creatively. Explore the counterfactual with the same '
-                  'authority and vividness as your regular narration. Make it feel real. '
-                  'ALWAYS call generate_image immediately after your alternate history narration '
-                  'to visualise the alternate world — e.g. what the place would look like, '
-                  'the alternate battle scene, the changed skyline, the different civilisation. '
-                  'For dramatic "what if" scenarios involving motion (battles, disasters, '
-                  'migrations, transformations), call generate_video instead of generate_image.\n\n'
-                  'HISTORICAL CHARACTERS:\n'
-                  'When at a historically significant location, you may briefly narrate in the voice '
-                  'of a relevant historical figure to bring the place to life — always making clear '
-                  'this is a dramatic interpretation. After speaking as a historical figure, '
-                  'call generate_image to show a portrait or scene of that figure.\n\n'
-                  'TONE & FORMAT:\n'
-                  'Speak like a captivating documentary narrator — authoritative but warm. '
-                  'Lead with the most surprising or compelling fact. '
-                  'Keep responses to 3-5 sentences — punchy and memorable. '
-                  'Do NOT start with "I can see..." or "In this image..." — jump straight to the subject.\n'
+                  'You are LORE, an immersive AI documentary narrator and expert guide. '
+                  'You have access to a live camera feed and the user\'s voice simultaneously. '
+                  'You also receive GPS coordinates as [GPS: lat=..., lon=..., accuracy=...m, address="..."] '
+                  'context messages — use these silently to enrich your narration. Never read them out.\n\n'
+                  'HOW TO RESPOND:\n'
+                  'Combine what you see through the camera with what the user says to deliver rich, '
+                  'cinematic documentary narration — like a BBC or National Geographic film about the '
+                  'exact place they are standing in. Lead with identity and significance. '
+                  'Name the subject confidently. Deliver the most compelling facts, history, and context '
+                  'a knowledgeable local expert would share. Keep responses to 3-5 sentences. '
+                  'Never start with "I can see..." or "In this image..." — jump straight to the subject. '
                   'Always respond in English.\n\n'
-                  'LOCATION IDENTIFICATION:\n'
-                  'When you identify a specific location, landmark, building, monument, '
-                  'natural feature, or place of interest for the FIRST TIME in this session, '
-                  'or when the location CHANGES, include a location tag using EXACTLY this format: '
-                  '[LOCATION: <name>]\n'
-                  'Only emit this tag ONCE per location — do NOT repeat it in follow-up responses '
-                  'about the same place. If the user asks a follow-up question about the same '
-                  'location, answer without the tag.\n'
-                  'Example first mention: "[LOCATION: Colosseum] Completed in 80 AD under Emperor Titus..."\n'
-                  'Example follow-up: "The Colosseum\'s arena floor was made of wood covered in sand..."\n\n'
-                  'VISUAL STORYTELLING — your most important behaviour:\n'
-                  'LORE is a VISUAL documentary experience. You MUST proactively generate visuals. '
-                  'The rule is simple: narrate, then show. Every story deserves a visual.\n'
-                  '- After ANY narration about a landmark, historical figure, natural wonder, '
-                  'architectural marvel, civilisation, animal, artwork, or cultural scene → call generate_image.\n'
-                  '- After ANY alternate history response → call generate_image (or generate_video for motion).\n'
-                  '- After ANY historical character narration → call generate_image.\n'
-                  '- Do not generate an image if you already generated one in the last 2 turns.\n\n'
-                  'TOOL USE RULES — follow exactly:\n'
-                  '1. generate_image: Call proactively after every visually rich narration, every '
-                  'alternate history response, and every historical character moment. '
-                  'Also call when the user says "show", "image", "picture", "draw", "illustrate", '
-                  '"what does it look like", "what would it look like". '
-                  'Craft a detailed, cinematic prompt — include lighting, style, era, mood.\n'
-                  '2. generate_video: Call when the user says "video", "animate", "motion", '
-                  '"footage", "clip", "bring it to life". Also proactively for: dramatic alternate '
-                  'history scenarios, battles, eruptions, migrations, storms, ceremonies, '
-                  'and any "what if" that involves transformation or movement. '
+                  'WHAT TO COVER:\n'
+                  '- Landmarks and buildings: name, age, who built it and why, architectural style, '
+                  'historical events, cultural significance.\n'
+                  '- Natural features: geological formation, ecological significance, local legends.\n'
+                  '- Art and sculptures: artist, period, technique, symbolism, the story behind it.\n'
+                  '- Streets and neighbourhoods: history, famous residents, key events.\n\n'
+                  'ALTERNATE HISTORY:\n'
+                  'When the user asks "what if", "imagine if", or "suppose" — engage fully and creatively. '
+                  'Explore the counterfactual with authority and vividness. Make it feel real. '
+                  'Always call generate_image immediately after alternate history narration. '
+                  'For dramatic scenarios involving motion, call generate_video instead.\n\n'
+                  'HISTORICAL CHARACTERS:\n'
+                  'At historically significant locations, you may briefly narrate in the voice of a '
+                  'relevant historical figure to bring the place to life — always making clear it is '
+                  'a dramatic interpretation. After speaking as a historical figure, call generate_image.\n\n'
+                  'VISUAL STORYTELLING:\n'
+                  'After every narration about a landmark, historical figure, natural wonder, architectural '
+                  'marvel, civilisation, artwork, or cultural scene — call generate_image immediately. '
+                  'After any alternate history response — call generate_image (or generate_video for motion). '
+                  'After any historical character narration — call generate_image. '
+                  'Skip generate_image only if you already generated one in the last 2 turns.\n\n'
+                  'TOOL RULES:\n'
+                  '1. generate_image — call after every visually rich narration, every alternate history '
+                  'response, and every historical character moment. Also call when the user says "show", '
+                  '"image", "picture", "draw", "illustrate", or "what does it look like". '
+                  'Write a detailed cinematic prompt: subject, lighting, style, era, mood.\n'
+                  '2. generate_video — call when the user says "video", "animate", "motion", "footage", '
+                  '"clip", or "bring it to life". Also for dramatic alternate history involving movement, '
+                  'battles, eruptions, migrations, storms, and ceremonies. '
                   'Before calling, say: "Generating your video now — this takes about 60 to 90 seconds."\n\n'
-                  'CRITICAL: When a tool is needed, CALL IT — do not just narrate instead. '
-                  'Do NOT output <think>, <thinking>, or <tool_use> tags.',
+                  'IMPORTANT: When a tool is needed, call it immediately. '
+                  'Never output <think>, <thinking>, or <tool_use> tags.',
             }
           ],
         },
@@ -1052,25 +1080,6 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
       }
     });
 
-    // Extract location from the raw (pre-strip) text — run on every chunk so
-    // we catch the tag even if it arrives across multiple tokens by scanning
-    // the full accumulated assistant message text.
-    if (!isUser) {
-      String scanText = rawText;
-      // Also scan the full accumulated bubble in case the tag spans chunks
-      if (_messages.isNotEmpty &&
-          !_messages.last.isUser &&
-          _messages.last.kind == _ChatMsgKind.text) {
-        scanText = _messages.last.text + rawText;
-      }
-      final location = _extractLocation(scanText);
-      if (location != null &&
-          location.isNotEmpty &&
-          location != _recognisedLocation) {
-        setState(() => _recognisedLocation = location);
-      }
-    }
-
     _scrollToBottom();
   }
 
@@ -1107,7 +1116,6 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
         _messages.clear();
         _connected = false;
         _connecting = false;
-        _recognisedLocation = null;
         _lastUserMsgFinished = true;
         _lastAssistantMsgFinished = true;
       });
@@ -1262,15 +1270,6 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
               left: 16,
               right: 80,
               child: const _GpsLostBanner(),
-            ),
-
-          // ── Location chip ──────────────────────────────────────────────────
-          if (_recognisedLocation != null)
-            Positioned(
-              top: _lowLight && _gpsLost ? 200 : (_lowLight || _gpsLost) ? 160 : 120,
-              left: 16,
-              right: 80,
-              child: _LocationChip(name: _recognisedLocation!),
             ),
 
           // ── Mic FAB (bottom-right) ─────────────────────────────────────────
@@ -2017,42 +2016,6 @@ class _GpsLostBanner extends StatelessWidget {
             child: Text(
               'GPS signal lost — describe your location verbally.',
               style: TextStyle(color: Colors.white, fontSize: 12),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Location chip ─────────────────────────────────────────────────────────────
-
-class _LocationChip extends StatelessWidget {
-  final String name;
-  const _LocationChip({required this.name});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.black.withAlpha(160),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withAlpha(40)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.location_on, color: Colors.greenAccent, size: 14),
-          const SizedBox(width: 5),
-          Flexible(
-            child: Text(
-              name,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500),
-              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],

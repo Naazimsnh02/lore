@@ -434,22 +434,47 @@ class VeoGenerator:
             poll_count += 1
 
         # Extract the generated video
-        if not operation.response or not operation.response.generated_videos:
+        # The SDK's GenerateVideosOperation wraps the raw response dict.
+        # On Vertex AI, generated_videos lives in the raw dict under 'response',
+        # not in operation.response (which is a typed object that may be None).
+        raw = getattr(operation, "__dict__", {})
+        raw_response = raw.get("response") or {}
+        if isinstance(raw_response, dict):
+            raw_videos = raw_response.get("generated_videos", [])
+        else:
+            # Typed object path (AI Studio)
+            raw_videos = getattr(raw_response, "generated_videos", None) or []
+
+        # Also check operation.error
+        raw_error = raw.get("error")
+        if raw_error and not raw_videos:
+            raise VeoGenerationError(
+                f"Veo returned error: {raw_error.get('message', raw_error)}"
+            )
+
+        if not raw_videos:
             raise VeoGenerationError(
                 "Veo returned no video data for the given prompt"
             )
 
-        generated_video = operation.response.generated_videos[0]
-        video_obj = generated_video.video
-
-        # Extract URL/URI from the video object
-        video_url = None
-        gcs_uri = None
-        if hasattr(video_obj, "uri") and video_obj.uri:
-            gcs_uri = video_obj.uri
-            video_url = video_obj.uri
-        elif hasattr(video_obj, "url") and video_obj.url:
-            video_url = video_obj.url
+        generated_video = raw_videos[0]
+        # generated_video may be a dict or a typed object
+        if isinstance(generated_video, dict):
+            video_obj = generated_video.get("video") or generated_video
+            video_url = (
+                video_obj.get("uri") or video_obj.get("url")
+                if isinstance(video_obj, dict) else None
+            )
+            gcs_uri = video_url
+        else:
+            video_obj = getattr(generated_video, "video", generated_video)
+            video_url = None
+            gcs_uri = None
+            if hasattr(video_obj, "uri") and video_obj.uri:
+                gcs_uri = video_obj.uri
+                video_url = video_obj.uri
+            elif hasattr(video_obj, "url") and video_obj.url:
+                video_url = video_obj.url
 
         # Parse duration from response or use requested duration
         clip_duration = float(scene.duration)

@@ -47,10 +47,14 @@ String get _kDefaultProxyUrl {
 
 const String _kProjectId =
     String.fromEnvironment('GCP_PROJECT_ID', defaultValue: '');
-const String _kModel = 'gemini-2.5-flash-native-audio-preview-12-2025';
+const bool _kUseVertexAI = String.fromEnvironment('GOOGLE_GENAI_USE_VERTEXAI', defaultValue: 'false') == 'true';
+
+const String _kModelVertex = 'gemini-live-2.5-flash-native-audio';
+const String _kModelAIStudio = 'gemini-2.5-flash-native-audio-preview-12-2025';
+String get _kModel => _kUseVertexAI ? _kModelVertex : _kModelAIStudio;
 
 String get _modelUri {
-  if (_kProjectId.isNotEmpty) {
+  if (_kUseVertexAI && _kProjectId.isNotEmpty) {
     return 'projects/$_kProjectId/locations/us-central1/publishers/google/models/$_kModel';
   }
   return 'models/$_kModel';
@@ -558,33 +562,34 @@ class _NewGpsModeScreenState extends ConsumerState<NewGpsModeScreen>
           'parts': [
             {
               'text':
-                  'You are LORE GPS — an immersive AI walking tour guide and documentary narrator. '
+                  'You are LORE GPS, an AI walking tour guide and documentary narrator. '
                   'You receive the user\'s real-time GPS location as [GPS: lat=..., lon=..., accuracy=...m, address="..."] messages.\n\n'
-                  'LOCATION IS ALWAYS FROM THE GPS MESSAGE — NEVER FROM YOUR TRAINING DATA.\n'
-                  'The address field is the ground truth. If the address says "Chennai, Tamil Nadu, India" — '
-                  'the user is in Chennai. Do NOT assume or guess a different city. '
-                  'Do NOT use your training data defaults. The address in the message overrides everything.\n\n'
-                  'GPS CONTEXT MESSAGES ARE SILENT:\n'
+                  'THE ADDRESS IS GROUND TRUTH:\n'
+                  'The address field tells you exactly where the user is. If it says "Chennai, Tamil Nadu, India" — '
+                  'the user is in Chennai. Never assume or guess a different location. '
+                  'The address overrides anything from your training data.\n\n'
+                  'GPS MESSAGES ARE SILENT:\n'
                   'When you receive a [GPS: ...] message, silently update your location awareness. '
-                  'DO NOT speak or narrate unless:\n'
-                  '1. The user asks you something (e.g. "where am I?", "what\'s nearby?", "tell me about this").\n'
-                  '2. The user moves within ~50m of a truly significant landmark (famous monument, historic site, '
-                  'major attraction) that you have NOT already narrated about this session.\n'
-                  'For routine GPS updates — stay completely silent.\n\n'
-                  'WHEN YOU DO NARRATE:\n'
-                  'Use the address to identify the most interesting landmark, neighbourhood, or point of interest. '
-                  'Lead with identity and significance. Be confident and specific. '
-                  'Keep responses to 3-5 sentences — punchy and memorable. '
-                  'Never repeat a location you already narrated this session.\n\n'
+                  'Do not speak unless:\n'
+                  '1. The user asks you something directly.\n'
+                  '2. The user moves within about 50 metres of a truly significant landmark — a famous monument, '
+                  'historic site, or major attraction — that you have not already narrated this session.\n'
+                  'For all other GPS updates, stay completely silent.\n\n'
+                  'WHEN YOU NARRATE:\n'
+                  'Use the address to identify the most interesting landmark or point of interest nearby. '
+                  'Lead with identity and significance — name the place confidently. '
+                  'Deliver the most compelling facts and context a knowledgeable local would share. '
+                  'Keep responses to 3-5 sentences. Never repeat a location you already narrated this session. '
+                  'Always respond in English.\n\n'
                   'NAVIGATION:\n'
-                  'You do NOT provide turn-by-turn directions — the app handles that. '
-                  'When the user asks to go somewhere — call navigate_to with the destination name.\n\n'
-                  'LOCATION IDENTIFICATION:\n'
-                  'Every time you narrate about a named place, include: [LOCATION: <name>]\n'
-                  'This adds it to the map — it is critical.\n\n'
-                  'TOOL USE RULES:\n'
-                  '1. navigate_to: Call when user asks for directions or to go somewhere.\n\n'
-                  'NEVER output <think>, <thinking>, or <tool_use> tags in your response.',
+                  'You do not provide turn-by-turn directions — the app handles that. '
+                  'When the user asks to go somewhere, call navigate_to with the destination name.\n\n'
+                  'LOCATION TAGGING:\n'
+                  'Every time you narrate about a named place, include [LOCATION: <name>] in your response. '
+                  'This is required — it adds the place to the map.\n\n'
+                  'TOOL RULES:\n'
+                  '1. navigate_to — call when the user asks for directions or to go somewhere.\n\n'
+                  'Never output <think>, <thinking>, or <tool_use> tags.',
             }
           ],
         },
@@ -1040,16 +1045,9 @@ class _NewGpsModeScreenState extends ConsumerState<NewGpsModeScreen>
             ),
           ),
           if (_gpsLost) const Positioned(top: 116, left: 16, right: 16, child: _GpsLostBanner()),
-          if (_recognisedLocation != null)
-            Positioned(
-              top: _gpsLost ? 172 : 116,
-              left: 16,
-              right: 80,
-              child: _LocationChip(name: _recognisedLocation!),
-            ),
           if (_landmarks.isNotEmpty)
             Positioned(
-              top: _recognisedLocation != null ? (_gpsLost ? 216 : 160) : (_gpsLost ? 172 : 116),
+              top: _gpsLost ? 172 : 116,
               left: 0,
               right: 0,
               child: _LandmarkCarousel(landmarks: _landmarks, selected: _selectedLandmark, onTap: _onLandmarkCardTap),
@@ -1227,52 +1225,6 @@ class _ChatBubble extends StatelessWidget {
       child: Container(margin: const EdgeInsets.symmetric(vertical: 3), padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
         decoration: BoxDecoration(color: msg.isUser ? Colors.greenAccent.withAlpha(200) : Colors.black.withAlpha(140), borderRadius: BorderRadius.only(topLeft: const Radius.circular(14), topRight: const Radius.circular(14), bottomLeft: Radius.circular(msg.isUser ? 14 : 4), bottomRight: Radius.circular(msg.isUser ? 4 : 14)), border: Border.all(color: msg.isUser ? Colors.greenAccent : Colors.white.withAlpha(20))),
         child: Text(msg.text, style: TextStyle(color: msg.isUser ? Colors.black : Colors.white, fontSize: 13, height: 1.4))));
-  }
-}
-
-// ── Location chip ─────────────────────────────────────────────────────────────
-
-class _LocationChip extends StatelessWidget {
-  final String name;
-  const _LocationChip({required this.name});
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.black.withAlpha(120),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white.withAlpha(50)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.location_on,
-                  color: Colors.greenAccent,
-                  shadows: [Shadow(color: Colors.black45, blurRadius: 4)],
-                  size: 14),
-              const SizedBox(width: 5),
-              Flexible(
-                child: Text(
-                  name,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      shadows: [Shadow(color: Colors.black45, blurRadius: 4)],
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 }
 

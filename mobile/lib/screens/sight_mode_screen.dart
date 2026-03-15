@@ -7,18 +7,27 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
+import 'package:gal/gal.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:video_player/video_player.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../services/camera_service.dart';
+
+const String _kMapsApiKey =
+    String.fromEnvironment('GOOGLE_MAPS_API_KEY', defaultValue: '');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -40,10 +49,14 @@ String get _kDefaultProxyUrl {
 
 const String _kProjectId =
     String.fromEnvironment('GCP_PROJECT_ID', defaultValue: '');
-const String _kModel = 'gemini-2.5-flash-native-audio-preview-12-2025';
+const bool _kUseVertexAI = String.fromEnvironment('GOOGLE_GENAI_USE_VERTEXAI', defaultValue: 'false') == 'true';
+
+const String _kModelVertex = 'gemini-live-2.5-flash-native-audio';
+const String _kModelAIStudio = 'gemini-2.5-flash-native-audio-preview-12-2025';
+String get _kModel => _kUseVertexAI ? _kModelVertex : _kModelAIStudio;
 
 String get _modelUri {
-  if (_kProjectId.isNotEmpty) {
+  if (_kUseVertexAI && _kProjectId.isNotEmpty) {
     return 'projects/$_kProjectId/locations/us-central1/publishers/google/models/$_kModel';
   }
   return 'models/$_kModel';
@@ -67,7 +80,9 @@ String _stripLocationTag(String text) =>
 enum _GeminiMsgType {
   setupComplete,
   audio,
+  inputTranscription,
   outputTranscription,
+  toolCall,
   turnComplete,
   interrupted,
   unknown,
@@ -87,8 +102,36 @@ class _GeminiMsg {
       if (data.containsKey('setupComplete')) {
         return const _GeminiMsg(type: _GeminiMsgType.setupComplete);
       }
+      if (data.containsKey('toolCall')) {
+        return const _GeminiMsg(type: _GeminiMsgType.toolCall);
+      }
       final sc = data['serverContent'] as Map<String, dynamic>?;
       if (sc != null) {
+        if (sc['turnComplete'] == true) {
+          return const _GeminiMsg(type: _GeminiMsgType.turnComplete);
+        }
+        if (sc['interrupted'] == true) {
+          return const _GeminiMsg(type: _GeminiMsgType.interrupted);
+        }
+        final inTrans = sc['inputTranscription'] as Map<String, dynamic>?;
+        if (inTrans != null) {
+          return _GeminiMsg(
+            type: _GeminiMsgType.inputTranscription,
+            text: inTrans['text'] as String? ?? '',
+            textFinished: inTrans['finished'] as bool? ?? false,
+          );
+        }
+        final outTrans = sc['outputTranscription'] as Map<String, dynamic>?;
+        if (outTrans != null) {
+          final text = outTrans['text'] as String? ?? '';
+          if (text.isNotEmpty) {
+            return _GeminiMsg(
+              type: _GeminiMsgType.outputTranscription,
+              text: text,
+              textFinished: outTrans['finished'] as bool? ?? false,
+            );
+          }
+        }
         List<dynamic>? parts =
             (sc['modelTurn'] as Map<String, dynamic>?)?['parts']
                 as List<dynamic>?;
@@ -102,31 +145,6 @@ class _GeminiMsg {
               return _GeminiMsg(
                   type: _GeminiMsgType.audio, audioBase64: audioData);
             }
-          }
-        }
-
-        final outTrans = sc['outputTranscription'] as Map<String, dynamic>?;
-        if (outTrans != null) {
-          final text = outTrans['text'] as String? ?? '';
-          if (text.isNotEmpty) {
-            return _GeminiMsg(
-              type: _GeminiMsgType.outputTranscription,
-              text: text,
-              textFinished: outTrans['finished'] as bool? ?? false,
-            );
-          }
-        }
-
-        if (sc['turnComplete'] == true) {
-          return const _GeminiMsg(type: _GeminiMsgType.turnComplete);
-        }
-        if (sc['interrupted'] == true) {
-          return const _GeminiMsg(type: _GeminiMsgType.interrupted);
-        }
-
-        if (parts != null) {
-          for (final part in parts) {
-            final p = part as Map<String, dynamic>;
             final textPart = p['text'] as String?;
             if (textPart != null && textPart.isNotEmpty) {
               return _GeminiMsg(
@@ -142,18 +160,28 @@ class _GeminiMsg {
   }
 }
 
-// ── Transcript message model ──────────────────────────────────────────────────
+// ── Chat message model ────────────────────────────────────────────────────────
 
-class _TranscriptMsg {
+enum _ChatMsgKind { text, image, video, loading }
+
+class _ChatMsg {
   final String id;
   final bool isUser;
   String text;
+  Uint8List? imageBytes;
+  String? imageMime;
+  String? videoUrl;
+  final _ChatMsgKind kind;
   final DateTime timestamp;
 
-  _TranscriptMsg({
+  _ChatMsg({
     required this.id,
     required this.isUser,
     required this.text,
+    this.imageBytes,
+    this.imageMime,
+    this.videoUrl,
+    required this.kind,
     DateTime? timestamp,
   }) : timestamp = timestamp ?? DateTime.now();
 
@@ -161,16 +189,30 @@ class _TranscriptMsg {
         'id': id,
         'isUser': isUser,
         'text': text,
+        'imageBase64': imageBytes != null ? base64Encode(imageBytes!) : null,
+        'imageMime': imageMime,
+        'videoUrl': videoUrl,
+        'kind': kind.name,
         'timestamp': timestamp.millisecondsSinceEpoch,
       };
 
-  factory _TranscriptMsg.fromJson(Map<String, dynamic> j) => _TranscriptMsg(
-        id: j['id'] as String,
-        isUser: j['isUser'] as bool,
-        text: j['text'] as String? ?? '',
-        timestamp: DateTime.fromMillisecondsSinceEpoch(
-            j['timestamp'] as int? ?? 0),
-      );
+  factory _ChatMsg.fromJson(Map<String, dynamic> j) {
+    final b64 = j['imageBase64'] as String?;
+    return _ChatMsg(
+      id: j['id'] as String,
+      isUser: j['isUser'] as bool,
+      text: j['text'] as String? ?? '',
+      imageBytes: b64 != null && b64.isNotEmpty ? base64Decode(b64) : null,
+      imageMime: j['imageMime'] as String?,
+      videoUrl: j['videoUrl'] as String?,
+      kind: _ChatMsgKind.values.firstWhere(
+        (e) => e.name == j['kind'],
+        orElse: () => _ChatMsgKind.text,
+      ),
+      timestamp:
+          DateTime.fromMillisecondsSinceEpoch(j['timestamp'] as int? ?? 0),
+    );
+  }
 }
 
 // ── Persistence ───────────────────────────────────────────────────────────────
@@ -191,10 +233,13 @@ class _Store {
     return id;
   }
 
-  static Future<void> save(
-      String sessionId, List<_TranscriptMsg> messages) async {
+  static Future<void> save(String sessionId, List<_ChatMsg> messages) async {
     final prefs = await SharedPreferences.getInstance();
-    final toSave = messages.where((m) => m.text.isNotEmpty).toList();
+    final toSave = messages
+        .where((m) =>
+            m.kind != _ChatMsgKind.loading &&
+            (m.text.isNotEmpty || m.imageBytes != null || m.videoUrl != null))
+        .toList();
     await prefs.setString('lore_session_$sessionId',
         json.encode(toSave.map((m) => m.toJson()).toList()));
     final sessions = prefs.getStringList(_sessionsKey) ?? [];
@@ -204,13 +249,13 @@ class _Store {
     }
   }
 
-  static Future<List<_TranscriptMsg>> load(String sessionId) async {
+  static Future<List<_ChatMsg>> load(String sessionId) async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString('lore_session_$sessionId');
     if (raw == null) return [];
     try {
       return (json.decode(raw) as List)
-          .map((e) => _TranscriptMsg.fromJson(e as Map<String, dynamic>))
+          .map((e) => _ChatMsg.fromJson(e as Map<String, dynamic>))
           .toList();
     } catch (_) {
       return [];
@@ -269,13 +314,15 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
   bool _feeding = false;
 
   // ── Transcript overlay ─────────────────────────────────────────────────────
-  final List<_TranscriptMsg> _messages = [];
+  final List<_ChatMsg> _messages = [];
   final ScrollController _scrollCtrl = ScrollController();
   bool _lastMsgFinished = true;
+  bool _lastUserMsgFinished = true;
   bool _showTranscript = false;
 
-  // ── Location ───────────────────────────────────────────────────────────────
-  String? _recognisedLocation;
+  // ── GPS ────────────────────────────────────────────────────────────────────
+  StreamSubscription<Position>? _gpsSub;
+  Position? _lastPosition;
 
   // ── Animation ─────────────────────────────────────────────────────────────
   late AnimationController _pulseCtrl;
@@ -298,6 +345,7 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
 
     await _initPcm();
     _sessionId = await _Store.newSession();
+    _initGps();
     await _initCameraAndStream();
   }
 
@@ -361,9 +409,97 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
     }
   }
 
+  // ── GPS context ──────────────────────────────────────────────────────────────
+
+  void _initGps() async {
+    final permission = await Geolocator.requestPermission();
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) return;
+
+    const settings = LocationSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 30,
+    );
+    _gpsSub = Geolocator.getPositionStream(locationSettings: settings).listen(
+      (pos) {
+        final prev = _lastPosition;
+        _lastPosition = pos;
+        if (_connected) {
+          final movedSignificantly = prev == null ||
+              Geolocator.distanceBetween(prev.latitude, prev.longitude,
+                      pos.latitude, pos.longitude) >
+                  50;
+          if (prev == null || movedSignificantly) {
+            _sendGpsContext(pos);
+          }
+        }
+      },
+      onError: (_) {},
+    );
+  }
+
+  Future<String?> _reverseGeocode(Position pos) async {
+    if (_kMapsApiKey.isNotEmpty) {
+      try {
+        final url = Uri.parse(
+          'https://maps.googleapis.com/maps/api/geocode/json'
+          '?latlng=${pos.latitude},${pos.longitude}&key=$_kMapsApiKey',
+        );
+        final resp = await http.get(url).timeout(const Duration(seconds: 5));
+        if (resp.statusCode == 200) {
+          final data = json.decode(resp.body) as Map<String, dynamic>;
+          if (data['status'] == 'OK') {
+            final results = data['results'] as List<dynamic>;
+            if (results.isNotEmpty) {
+              return (results.first as Map<String, dynamic>)['formatted_address']
+                  as String?;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+    // Fallback: OpenStreetMap Nominatim
+    try {
+      final url = Uri.parse(
+        'https://nominatim.openstreetmap.org/reverse'
+        '?lat=${pos.latitude}&lon=${pos.longitude}&format=json',
+      );
+      final resp = await http
+          .get(url, headers: {'User-Agent': 'LoreSightMode/1.0'}).timeout(
+        const Duration(seconds: 5),
+      );
+      if (resp.statusCode == 200) {
+        final data = json.decode(resp.body) as Map<String, dynamic>;
+        return data['display_name'] as String?;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> _sendGpsContext(Position pos) async {
+    final address = await _reverseGeocode(pos);
+    final addressPart = address != null ? ', address="$address"' : '';
+    final tag = '[GPS: lat=${pos.latitude.toStringAsFixed(5)}, '
+        'lon=${pos.longitude.toStringAsFixed(5)}, '
+        'accuracy=${pos.accuracy.toStringAsFixed(0)}m$addressPart]';
+    if (!_connected || _disposed) return;
+    _wsSend({
+      'client_content': {
+        'turns': [
+          {
+            'role': 'user',
+            'parts': [
+              {'text': tag}
+            ]
+          }
+        ],
+        'turn_complete': false,
+      }
+    });
+  }
+
   /// Streams live camera frames at 1fps via realtime_input.video.
-  void _startVideoStream() {
-    _frameTimer?.cancel();
+  void _startVideoStream() {    _frameTimer?.cancel();
     _frameTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
       if (!_connected || _disposed || _cameraService.controller == null) return;
       try {
@@ -385,6 +521,7 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
     _frameTimer?.cancel();
     _lightingSub?.cancel();
     _lowLightTimer?.cancel();
+    _gpsSub?.cancel();
     _cameraService.dispose();
     _disconnectCleanup();
     _pulseCtrl.dispose();
@@ -458,47 +595,84 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
           'parts': [
             {
               'text':
-                  'You are LORE — a world-class expert guide who turns a live camera view into a rich, '
-                  'immersive knowledge experience. The user is pointing their camera at something and '
-                  'wants to truly understand what they are looking at — not just what it looks like, '
-                  'but what it IS, why it matters, and what makes it fascinating.\n\n'
-                  'YOUR CORE BEHAVIOUR:\n'
-                  'Wait for the user to speak. When they ask a question, lead immediately with IDENTITY '
-                  'and SIGNIFICANCE. Name the subject confidently. Then deliver the most compelling '
-                  'facts, history, and context — the kind of insight a knowledgeable local expert or '
-                  'historian would share. Think of yourself as a brilliant friend who happens to know '
-                  'everything about this place, object, or scene.\n\n'
-                  'WHAT TO COVER (pick the most relevant for what you see):\n'
-                  '- For landmarks & buildings: name, age, who built it and why, architectural style, '
-                  'historical events that happened here, cultural or religious significance, '
-                  'interesting stories or controversies, what it represents to locals.\n'
-                  '- For natural features: geological formation, ecological significance, '
-                  'endemic species, local legends, conservation status.\n'
-                  '- For art & sculptures: artist, period, technique, symbolism, the story behind it.\n'
-                  '- For food & objects: origin, cultural context, how it is made or used, '
-                  'regional variations, why it matters.\n'
-                  '- For streets & neighbourhoods: historical name changes, famous residents, '
-                  'key events, how the area evolved over time.\n\n'
-                  'TONE & FORMAT:\n'
-                  'Speak like a captivating documentary narrator — authoritative but warm, '
-                  'never dry or encyclopaedic. Lead with the most surprising or compelling fact. '
-                  'Keep responses to 3-5 sentences — punchy and memorable. '
-                  'The user can ask follow-up questions to go deeper.\n'
-                  'Do NOT start with "I can see..." or "In this image..." — jump straight to the subject.\n'
+                  'You are LORE, an expert guide who turns a live camera view into a rich documentary experience. '
+                  'The user is pointing their camera at something and wants to understand what they are looking at — '
+                  'what it is, why it matters, and what makes it fascinating.\n\n'
+                  'GPS CONTEXT:\n'
+                  'You may receive [GPS: lat=..., lon=..., accuracy=...m, address="..."] messages. '
+                  'Use the address silently to enrich your narration. Never read out or mention these messages.\n\n'
+                  'HOW TO RESPOND:\n'
+                  'Wait for the user to speak. When they ask a question, lead with identity and significance — '
+                  'name the subject confidently, then deliver the most compelling facts, history, and context '
+                  'a knowledgeable local expert would share. Keep responses to 3-5 sentences. '
+                  'Never start with "I can see..." or "In this image..." — jump straight to the subject. '
                   'Always respond in English.\n\n'
-                  'LOCATION IDENTIFICATION:\n'
-                  'Whenever you identify a specific location, landmark, building, monument, '
-                  'natural feature, or place of interest, include a location tag using EXACTLY '
-                  'this format: [LOCATION: <name>]\n'
-                  'Example: "[LOCATION: Hagia Sophia] Built in 537 AD under Emperor Justinian I, '
-                  'the Hagia Sophia stood as the world\'s largest cathedral for nearly a thousand years."\n'
-                  'If you cannot identify a specific location, do NOT include the tag.\n\n'
-                  'CRITICAL: Do NOT output <think>, <thinking>, or <tool_use> tags. '
-                  'Do NOT offer to generate images or videos. '
-                  'If you genuinely cannot identify the subject, say so briefly and ask the user for context.',
+                  'WHAT TO COVER:\n'
+                  '- Landmarks and buildings: name, age, who built it and why, architectural style, '
+                  'historical events, cultural significance.\n'
+                  '- Natural features: geological formation, ecological significance, local legends.\n'
+                  '- Art and sculptures: artist, period, technique, symbolism, the story behind it.\n'
+                  '- Streets and neighbourhoods: history, famous residents, key events.\n\n'
+                  'ALTERNATE HISTORY:\n'
+                  'When the user asks "what if" or "imagine if" — engage fully and creatively. '
+                  'Always call generate_image after alternate history narration to visualise the alternate world. '
+                  'For scenarios involving motion, call generate_video instead.\n\n'
+                  'VISUAL STORYTELLING:\n'
+                  'After every narration about a landmark, historical figure, natural wonder, architectural marvel, '
+                  'civilisation, artwork, or cultural scene — call generate_image immediately. '
+                  'After any alternate history response — call generate_image (or generate_video for motion). '
+                  'Skip generate_image only if you already generated one in the last 2 turns.\n\n'
+                  'TOOL RULES:\n'
+                  '1. generate_image — call after every visually rich narration and every alternate history response. '
+                  'Also call when the user says "show", "image", "picture", "draw", or "illustrate". '
+                  'Write a detailed cinematic prompt: subject, lighting, style, era, mood.\n'
+                  '2. generate_video — call when the user says "video", "animate", "motion", "footage", '
+                  '"clip", or "bring it to life". Also for dramatic alternate history involving movement. '
+                  'Before calling, say: "Generating your video now — this takes about 60 to 90 seconds."\n\n'
+                  'IMPORTANT: When a tool is needed, call it immediately. '
+                  'Never output <think>, <thinking>, or <tool_use> tags.',
             }
           ],
         },
+        'tools': [
+          {
+            'function_declarations': [
+              {
+                'name': 'generate_image',
+                'description':
+                    'Generates a documentary-style illustration. Call proactively after rich narration '
+                    'or when the user asks to see, show, draw, or visualise something.',
+                'parameters': {
+                  'type': 'object',
+                  'properties': {
+                    'prompt': {
+                      'type': 'string',
+                      'description': 'Detailed cinematic image generation prompt.'
+                    }
+                  },
+                  'required': ['prompt']
+                },
+              },
+              {
+                'name': 'generate_video',
+                'description':
+                    'Generates a short cinematic video clip (8 seconds). Call when the user asks '
+                    'for a video or animation. Takes 60-90 seconds.',
+                'parameters': {
+                  'type': 'object',
+                  'properties': {
+                    'prompt': {
+                      'type': 'string',
+                      'description': 'Detailed video generation prompt.'
+                    }
+                  },
+                  'required': ['prompt']
+                },
+              },
+            ]
+          }
+        ],
+        'input_audio_transcription': {},
         'output_audio_transcription': {},
         'realtime_input_config': {
           'automatic_activity_detection': {
@@ -538,6 +712,10 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
     try {
       final text = raw is Uint8List ? utf8.decode(raw) : raw as String;
       final data = json.decode(text) as Map<String, dynamic>;
+      if (data.containsKey('toolCall')) {
+        _handleToolCall(data);
+        return;
+      }
       final msg = _GeminiMsg.parse(data);
       switch (msg.type) {
         case _GeminiMsgType.setupComplete:
@@ -547,21 +725,33 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
           if (msg.audioBase64 != null && msg.audioBase64!.isNotEmpty) {
             _playPcmChunk(base64Decode(msg.audioBase64!));
           }
+        case _GeminiMsgType.inputTranscription:
+          if (msg.text != null && msg.text!.isNotEmpty) {
+            _appendTranscript(msg.text!, isUser: true, finished: msg.textFinished ?? false);
+          }
         case _GeminiMsgType.outputTranscription:
           if (msg.text != null && msg.text!.isNotEmpty) {
-            _appendTranscript(msg.text!, finished: msg.textFinished ?? false);
+            _appendTranscript(msg.text!, isUser: false, finished: msg.textFinished ?? false);
           }
         case _GeminiMsgType.turnComplete:
           if (mounted && !_disposed) {
             setState(() {
               _playing = false;
               _lastMsgFinished = true;
+              _lastUserMsgFinished = true;
             });
           }
           _saveSession();
         case _GeminiMsgType.interrupted:
           _stopPlayback();
-          if (mounted && !_disposed) setState(() => _lastMsgFinished = true);
+          if (mounted && !_disposed) {
+            setState(() {
+              _lastMsgFinished = true;
+              _lastUserMsgFinished = true;
+            });
+          }
+        case _GeminiMsgType.toolCall:
+          _handleToolCall(data);
         case _GeminiMsgType.unknown:
           break;
       }
@@ -570,34 +760,197 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
     }
   }
 
-  void _appendTranscript(String rawText, {required bool finished}) {
+  // ── Tool calls ──────────────────────────────────────────────────────────────
+
+  void _handleToolCall(Map<String, dynamic> data) {
+    final calls =
+        (data['toolCall']?['functionCalls'] as List<dynamic>?) ?? [];
+    for (final call in calls) {
+      final c = call as Map<String, dynamic>;
+      final name = c['name'] as String? ?? '';
+      final id = c['id'] as String? ?? '';
+      final prompt =
+          (c['args'] as Map<String, dynamic>?)?['prompt'] as String? ?? '';
+      if (name == 'generate_image') {
+        final loadingId = _addLoadingMsg('Generating image...');
+        _runGenerateImage(id, prompt, loadingId);
+      } else if (name == 'generate_video') {
+        final loadingId =
+            _addLoadingMsg('Generating video — this takes ~60-90s...');
+        _runGenerateVideo(id, prompt, loadingId);
+      }
+    }
+  }
+
+  String _addLoadingMsg(String label) {
+    final id = 'loading_${DateTime.now().microsecondsSinceEpoch}';
+    if (mounted && !_disposed) {
+      setState(() => _messages.add(_ChatMsg(
+          id: id, isUser: false, text: label, kind: _ChatMsgKind.loading)));
+    }
+    _scrollToBottom();
+    return id;
+  }
+
+  void _removeLoadingMsg(String id) {
+    if (mounted && !_disposed) {
+      setState(() => _messages.removeWhere((m) => m.id == id));
+    }
+  }
+
+  Future<void> _runGenerateImage(
+      String callId, String prompt, String loadingId) async {
+    final host = Uri.parse(_kDefaultProxyUrl).host;
+    try {
+      final resp = await http
+          .post(
+            Uri.parse('http://$host:8091/generate'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({'prompt': prompt}),
+          )
+          .timeout(const Duration(seconds: 60));
+      _removeLoadingMsg(loadingId);
+      if (resp.statusCode == 200) {
+        final body = json.decode(resp.body) as Map<String, dynamic>;
+        final b64 = body['image_base64'] as String?;
+        final mime = body['mime_type'] as String? ?? 'image/png';
+        if (b64 != null && b64.isNotEmpty) {
+          final msg = _ChatMsg(
+            id: '${DateTime.now().microsecondsSinceEpoch}',
+            isUser: false,
+            text: '',
+            imageBytes: base64Decode(b64),
+            imageMime: mime,
+            kind: _ChatMsgKind.image,
+          );
+          if (mounted && !_disposed) setState(() => _messages.add(msg));
+          _scrollToBottom();
+          _saveSession();
+          _wsSend({
+            'tool_response': {
+              'function_responses': [
+                {
+                  'id': callId,
+                  'name': 'generate_image',
+                  'response': {'result': 'Image generated successfully.'}
+                }
+              ]
+            }
+          });
+          return;
+        }
+      }
+      throw Exception('HTTP ${resp.statusCode}');
+    } catch (e) {
+      _removeLoadingMsg(loadingId);
+      _wsSend({
+        'tool_response': {
+          'function_responses': [
+            {
+              'id': callId,
+              'name': 'generate_image',
+              'response': {'error': e.toString()}
+            }
+          ]
+        }
+      });
+    }
+  }
+
+  Future<void> _runGenerateVideo(
+      String callId, String prompt, String loadingId) async {
+    final host = Uri.parse(_kDefaultProxyUrl).host;
+    try {
+      final resp = await http
+          .post(
+            Uri.parse('http://$host:8092/generate'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({'prompt': prompt}),
+          )
+          .timeout(const Duration(minutes: 4));
+      _removeLoadingMsg(loadingId);
+      if (resp.statusCode == 200) {
+        final body = json.decode(resp.body) as Map<String, dynamic>;
+        final videoUrl = body['video_url'] as String?;
+        if (videoUrl != null && videoUrl.isNotEmpty) {
+          final msg = _ChatMsg(
+            id: '${DateTime.now().microsecondsSinceEpoch}',
+            isUser: false,
+            text: '',
+            videoUrl: videoUrl,
+            kind: _ChatMsgKind.video,
+          );
+          if (mounted && !_disposed) setState(() => _messages.add(msg));
+          _scrollToBottom();
+          _saveSession();
+          _wsSend({
+            'tool_response': {
+              'function_responses': [
+                {
+                  'id': callId,
+                  'name': 'generate_video',
+                  'response': {'result': 'Video generated successfully.'}
+                }
+              ]
+            }
+          });
+          return;
+        }
+      }
+      throw Exception('HTTP ${resp.statusCode}');
+    } catch (e) {
+      _removeLoadingMsg(loadingId);
+      _wsSend({
+        'tool_response': {
+          'function_responses': [
+            {
+              'id': callId,
+              'name': 'generate_video',
+              'response': {'error': e.toString()}
+            }
+          ]
+        }
+      });
+    }
+  }
+
+  void _appendTranscript(String rawText, {required bool isUser, required bool finished}) {
     if (!mounted || _disposed || rawText.trim().isEmpty) return;
 
-    final location = _extractLocation(rawText);
-    if (location != null && location.isNotEmpty) {
-      setState(() => _recognisedLocation = location);
-    }
     final displayText = _stripLocationTag(rawText);
     if (displayText.isEmpty) return;
 
     setState(() {
-      if (!_lastMsgFinished &&
+      final lastFinished = isUser ? _lastUserMsgFinished : _lastMsgFinished;
+      if (!lastFinished &&
           _messages.isNotEmpty &&
-          !_messages.last.isUser) {
+          _messages.last.isUser == isUser &&
+          _messages.last.kind == _ChatMsgKind.text) {
         final existing = _messages.last.text;
         final needsSpace = existing.isNotEmpty &&
             !existing.endsWith(' ') &&
             !displayText.startsWith(' ');
         _messages.last.text =
             needsSpace ? '$existing $displayText' : '$existing$displayText';
-        if (finished) _lastMsgFinished = true;
+        if (finished) {
+          if (isUser) {
+            _lastUserMsgFinished = true;
+          } else {
+            _lastMsgFinished = true;
+          }
+        }
       } else {
-        _messages.add(_TranscriptMsg(
+        _messages.add(_ChatMsg(
           id: '${DateTime.now().microsecondsSinceEpoch}',
-          isUser: false,
+          isUser: isUser,
           text: displayText,
+          kind: _ChatMsgKind.text,
         ));
-        _lastMsgFinished = finished;
+        if (isUser) {
+          _lastUserMsgFinished = finished;
+        } else {
+          _lastMsgFinished = finished;
+        }
       }
     });
     _scrollToBottom();
@@ -808,15 +1161,6 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
               child: _LowLightBanner(),
             ),
 
-          // ── Location chip ────────────────────────────────────────────────
-          if (_recognisedLocation != null)
-            Positioned(
-              top: _lowLight ? 120 : 80,
-              left: 16,
-              right: 16,
-              child: _LocationChip(name: _recognisedLocation!),
-            ),
-
           // ── Mic FAB (bottom-right) ───────────────────────────────────────
           Positioned(
             right: 16,
@@ -879,7 +1223,7 @@ class _FullscreenCamera extends StatelessWidget {
 // ── Transcript panel ──────────────────────────────────────────────────────────
 
 class _TranscriptPanel extends StatelessWidget {
-  final List<_TranscriptMsg> messages;
+  final List<_ChatMsg> messages;
   final ScrollController scrollCtrl;
   final bool visible;
 
@@ -899,7 +1243,7 @@ class _TranscriptPanel extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         child: Container(
           constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.38),
+              maxHeight: MediaQuery.of(context).size.height * 0.5),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
@@ -915,7 +1259,7 @@ class _TranscriptPanel extends StatelessWidget {
             controller: scrollCtrl,
             padding: const EdgeInsets.fromLTRB(16, 24, 80, 80),
             itemCount: messages.length,
-            itemBuilder: (_, i) => _TranscriptItem(msg: messages[i]),
+            itemBuilder: (_, i) => _ChatBubble(msg: messages[i]),
           ),
         ),
       ),
@@ -923,12 +1267,47 @@ class _TranscriptPanel extends StatelessWidget {
   }
 }
 
-class _TranscriptItem extends StatelessWidget {
-  final _TranscriptMsg msg;
-  const _TranscriptItem({required this.msg});
+class _ChatBubble extends StatelessWidget {
+  final _ChatMsg msg;
+  const _ChatBubble({required this.msg});
 
   @override
   Widget build(BuildContext context) {
+    if (msg.kind == _ChatMsgKind.loading) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.white38),
+            ),
+            const SizedBox(width: 8),
+            Text(msg.text,
+                style: const TextStyle(color: Colors.white38, fontSize: 12)),
+          ],
+        ),
+      );
+    }
+    if (msg.kind == _ChatMsgKind.image && msg.imageBytes != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Image.memory(msg.imageBytes!,
+              fit: BoxFit.cover,
+              width: double.infinity,
+              gaplessPlayback: true),
+        ),
+      );
+    }
+    if (msg.kind == _ChatMsgKind.video && msg.videoUrl != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: _VideoPlayer(url: msg.videoUrl!),
+      );
+    }
     if (msg.text.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
@@ -942,6 +1321,57 @@ class _TranscriptItem extends StatelessWidget {
           height: 1.5,
           letterSpacing: 0.1,
         ),
+      ),
+    );
+  }
+}
+
+class _VideoPlayer extends StatefulWidget {
+  final String url;
+  const _VideoPlayer({required this.url});
+
+  @override
+  State<_VideoPlayer> createState() => _VideoPlayerState();
+}
+
+class _VideoPlayerState extends State<_VideoPlayer> {
+  VideoPlayerController? _ctrl;
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    final ctrl = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+    await ctrl.initialize();
+    if (!mounted) { ctrl.dispose(); return; }
+    setState(() { _ctrl = ctrl; _ready = true; });
+    ctrl.play();
+    ctrl.setLooping(true);
+  }
+
+  @override
+  void dispose() {
+    _ctrl?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_ready || _ctrl == null) {
+      return const AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Center(child: CircularProgressIndicator(color: Colors.white38)),
+      );
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: AspectRatio(
+        aspectRatio: _ctrl!.value.aspectRatio,
+        child: VideoPlayer(_ctrl!),
       ),
     );
   }
@@ -967,40 +1397,6 @@ class _LowLightBanner extends StatelessWidget {
           SizedBox(width: 6),
           Text('Low light — results may vary',
               style: TextStyle(color: Colors.white, fontSize: 12)),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Location chip ─────────────────────────────────────────────────────────────
-
-class _LocationChip extends StatelessWidget {
-  final String name;
-  const _LocationChip({required this.name});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(
-        color: Colors.black.withAlpha(180),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white24),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.location_on_rounded,
-              color: Colors.blueAccent, size: 14),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              name,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
         ],
       ),
     );

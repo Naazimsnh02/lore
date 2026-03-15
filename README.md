@@ -145,6 +145,32 @@ lore-websocket-gateway   — wss://lore-websocket-gateway-HASH-uc.a.run.app
 
 ---
 
+## Switching AI Modes (AI Studio vs Vertex AI)
+
+LORE supports both **Google AI Studio** (for fast local prototyping) and **Vertex AI** (for production-grade features like Veo video with audio). Switching between them only requires touching two files:
+
+### 1. Flutter (`mobile/dart-defines.json`)
+```json
+{
+  "GOOGLE_GENAI_USE_VERTEXAI": "true",   // Use "false" for AI Studio
+  "GCP_PROJECT_ID": "your-project-id"    // Omit or leave empty for AI Studio
+}
+```
+*Note: After changing `dart-defines.json`, you MUST perform a full rebuild: `flutter run --dart-define-from-file=dart-defines.json`.*
+
+### 2. Backend (`.env`)
+```bash
+GOOGLE_GENAI_USE_VERTEXAI=true   # or false
+
+# Use the appropriate model ID for the selected mode:
+# Vertex AI:
+GEMINI_LIVE_MODEL=gemini-live-2.5-flash-native-audio
+# AI Studio:
+# GEMINI_LIVE_MODEL=gemini-2.5-flash-native-audio-preview-12-2025
+```
+
+---
+
 ## Tech Stack
 
 - **Gemini Live API** — real-time bidirectional audio/video/text streaming

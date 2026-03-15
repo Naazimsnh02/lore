@@ -52,7 +52,7 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 # ── Model identifiers ────────────────────────────────────────
-LIVE_AUDIO_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
+LIVE_AUDIO_MODEL = "gemini-live-2.5-flash-native-audio"
 SCRIPT_MODEL = "gemini-3-flash-preview"
 
 # ── Defaults ──────────────────────────────────────────────────

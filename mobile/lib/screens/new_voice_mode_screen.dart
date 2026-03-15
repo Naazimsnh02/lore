@@ -37,10 +37,15 @@ String get _kDefaultProxyUrl {
 }
 
 const String _kProjectId = String.fromEnvironment('GCP_PROJECT_ID', defaultValue: '');
-const String _kModel = 'gemini-2.5-flash-native-audio-preview-12-2025';
+const bool _kUseVertexAI = String.fromEnvironment('GOOGLE_GENAI_USE_VERTEXAI', defaultValue: 'false') == 'true';
+
+// Vertex AI and AI Studio use different model IDs for the Live API
+const String _kModelVertex = 'gemini-live-2.5-flash-native-audio';
+const String _kModelAIStudio = 'gemini-2.5-flash-native-audio-preview-12-2025';
+String get _kModel => _kUseVertexAI ? _kModelVertex : _kModelAIStudio;
 
 String get _modelUri {
-  if (_kProjectId.isNotEmpty) {
+  if (_kUseVertexAI && _kProjectId.isNotEmpty) {
     return 'projects/$_kProjectId/locations/us-central1/publishers/google/models/$_kModel';
   }
   return 'models/$_kModel';
@@ -287,37 +292,31 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen> with Ti
         },
         'system_instruction': {
           'parts': [{'text':
-            'You are LORE — an immersive AI documentary narrator and visual storyteller. '
-            'LORE turns the world into a living, visual documentary experience. '
-            'Users speak any topic — a landmark, historical event, scientific concept, '
-            'culture, nature, architecture — and you deliver rich, cinematic documentary '
-            'narration as if they are watching a high-quality BBC or National Geographic film. '
-            'Be authoritative, vivid, and engaging. Use evocative language. '
-            'Build narrative momentum — open with a compelling hook, develop the story, '
-            'and leave the listener wanting more. '
-            'Always respond in English regardless of the language spoken to you. '
-            '\n\nVISUAL STORYTELLING — this is your most important behaviour:\n'
-            'LORE is a VISUAL documentary experience. You MUST proactively generate images '
-            'to accompany your narration. After delivering narration about any visually '
-            'compelling subject — a landmark, historical figure, natural wonder, architectural '
-            'marvel, battle, civilisation, animal, celestial body, artwork, or cultural scene — '
-            'you MUST call generate_image immediately after speaking, without waiting to be asked. '
-            'Think of it as: you narrate, then you show. Every story deserves a visual. '
-            'Do not generate an image if you already generated one in the last 2 turns.\n\n'
-            'TOOL USE RULES — follow these exactly:\n'
-            '1. generate_image: Call this proactively after narrating any visually rich topic. '
-            'Also call it whenever the user says "show", "image", "picture", "draw", '
-            '"illustrate", "what does it look like", or any similar visual request. '
-            'Craft a detailed, cinematic prompt — include lighting, style, era, mood. '
-            'Do NOT just describe — CALL THE FUNCTION.\n'
-            '2. generate_video: Call this whenever the user says "video", "animate", '
-            '"motion", "footage", "clip", "bring it to life", "show me a video", '
-            'or any similar motion request. Also proactively offer video for dramatic '
-            'moments: battles, eruptions, migrations, storms, ceremonies. '
-            'Before calling, say: "Generating your video now — this takes about 60 to 90 seconds." '
-            'Then CALL THE FUNCTION immediately.\n\n'
-            'CRITICAL: When a tool is needed, call it — do not just narrate instead. '
-            'Do NOT output <think>, <thinking>, or <tool_use> tags.',
+            'You are LORE, an AI documentary narrator and visual storyteller. '
+            'Your job is to turn any topic the user speaks about into a rich, cinematic documentary experience — '
+            'like a BBC or National Geographic film brought to life through conversation.\n\n'
+            'HOW TO RESPOND:\n'
+            'When the user mentions any topic — a landmark, historical event, scientific concept, '
+            'culture, nature, architecture, person, or place — respond with authoritative, vivid narration. '
+            'Open with a compelling hook. Build the story with surprising facts and context. '
+            'Keep it to 3-5 sentences — punchy, memorable, and engaging. '
+            'Always respond in English.\n\n'
+            'VISUAL STORYTELLING:\n'
+            'After every narration about a visually compelling subject, call generate_image immediately. '
+            'Do not wait to be asked. The rule is: narrate, then show. '
+            'Subjects that always deserve an image: landmarks, historical figures, natural wonders, '
+            'battles, civilisations, animals, artworks, celestial bodies, cultural scenes, architecture. '
+            'Skip generate_image only if you already generated one in the last 2 turns.\n\n'
+            'TOOL RULES:\n'
+            '1. generate_image — call after every visually rich narration, and whenever the user says '
+            '"show", "image", "picture", "draw", "illustrate", or "what does it look like". '
+            'Write a detailed cinematic prompt: subject, lighting, style, era, mood.\n'
+            '2. generate_video — call when the user says "video", "animate", "motion", "footage", '
+            '"clip", or "bring it to life". Also use it proactively for dramatic motion scenes: '
+            'battles, eruptions, migrations, storms, ceremonies. '
+            'Before calling, say: "Generating your video now — this takes about 60 to 90 seconds."\n\n'
+            'IMPORTANT: When a tool is needed, call it immediately. Do not describe what you would show — show it. '
+            'Never output <think>, <thinking>, or <tool_use> tags.',
           }],
         },
         'tools': [{'function_declarations': [
@@ -650,11 +649,11 @@ class _EmptyState extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.mic_none, color: Colors.white12, size: 72),
+          Icon(Icons.mic_none, color: Colors.white38, size: 72),
           SizedBox(height: 16),
-          Text('Tap the mic to begin', textAlign: TextAlign.center, style: TextStyle(color: Colors.white24, fontSize: 15, letterSpacing: 0.5)),
-          SizedBox(height: 6),
-          Text('Ask LORE about anything', textAlign: TextAlign.center, style: TextStyle(color: Colors.white12, fontSize: 12)),
+          Text('Tap the mic to begin', textAlign: TextAlign.center, style: TextStyle(color: Colors.white70, fontSize: 16, fontWeight: FontWeight.w500, letterSpacing: 0.5)),
+          SizedBox(height: 8),
+          Text('Ask LORE about anything', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54, fontSize: 13)),
         ],
       ),
     );
@@ -1050,7 +1049,10 @@ class _WaveformBar extends StatelessWidget {
     return Container(
       height: 48,
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(color: Colors.white.withAlpha(6), borderRadius: BorderRadius.circular(10)),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0A1A0A), // Match the screen background
+        borderRadius: BorderRadius.circular(10),
+      ),
       child: AnimatedBuilder(
         animation: animation,
         builder: (_, __) => CustomPaint(size: Size.infinite, painter: _WavePainter(t: animation.value, active: active)),

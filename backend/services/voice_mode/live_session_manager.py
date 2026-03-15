@@ -42,10 +42,10 @@ logger = logging.getLogger(__name__)
 # ── Constants matching the reference script ───────────────────────────────────
 
 _raw_model = os.getenv(
-    "GEMINI_LIVE_MODEL", "models/gemini-2.5-flash-native-audio-preview-12-2025"
+    "GEMINI_LIVE_MODEL", "models/gemini-live-2.5-flash-native-audio"
 )
 # The Live API requires the "models/" prefix. Guard against .env values that
-# omit it (e.g. GEMINI_LIVE_MODEL=gemini-2.5-flash-native-audio-preview-12-2025).
+# omit it (e.g. GEMINI_LIVE_MODEL=gemini-live-2.5-flash-native-audio).
 LIVE_MODEL: str = _raw_model if _raw_model.startswith("models/") else f"models/{_raw_model}"
 SEND_SAMPLE_RATE: int = 16_000    # 16 kHz input — Gemini Live API requirement
 RECEIVE_SAMPLE_RATE: int = 24_000  # 24 kHz output PCM from the model

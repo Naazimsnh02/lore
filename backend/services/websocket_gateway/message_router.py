@@ -62,10 +62,11 @@ class MessageRouter:
 
         # ── Gemini client (shared across handlers) ─────────────────────────
         self._genai_client: Optional[Any] = None
+        _use_vertex = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "false").lower() == "true"
         try:
             import google.genai as genai
             api_key = os.getenv("GEMINI_API_KEY")
-            use_vertex = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "false").lower() == "true"
+            use_vertex = _use_vertex
             if use_vertex:
                 self._genai_client = genai.Client(
                     vertexai=True,
@@ -103,7 +104,15 @@ class MessageRouter:
         if self._genai_client:
             try:
                 from ..nano_illustrator.illustrator import NanoIllustrator
-                self._nano_illustrator = NanoIllustrator(client=self._genai_client)
+                # Image generation models require location=global on Vertex AI
+                _image_client = self._genai_client
+                if _use_vertex:
+                    _image_client = genai.Client(
+                        vertexai=True,
+                        project=os.getenv("GCP_PROJECT_ID"),
+                        location="global",
+                    )
+                self._nano_illustrator = NanoIllustrator(client=_image_client)
                 logger.info("NanoIllustrator initialized successfully")
             except Exception as e:
                 logger.warning("Failed to initialize NanoIllustrator: %s", e)

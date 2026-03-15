@@ -38,7 +38,8 @@ PORT = int(os.getenv("IMAGE_SERVER_PORT", "8091"))
 def _make_client():
     from google import genai
     if USE_VERTEX:
-        return genai.Client(vertexai=True, project=GCP_PROJECT, location=VERTEX_LOCATION)
+        # Image generation models require location=global on Vertex AI
+        return genai.Client(vertexai=True, project=GCP_PROJECT, location="global")
     return genai.Client(api_key=GEMINI_API_KEY)
 
 
@@ -99,8 +100,8 @@ async def handle_generate(request: web.Request) -> web.Response:
 
 
 async def main():
-    if not GEMINI_API_KEY:
-        print("ERROR: GEMINI_API_KEY not set in .env")
+    if not USE_VERTEX and not GEMINI_API_KEY:
+        print("ERROR: GEMINI_API_KEY not set in .env (required for AI Studio mode)")
         return
 
     print(f"Using model: {MODEL_ID}")

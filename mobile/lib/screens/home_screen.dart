@@ -23,10 +23,9 @@ class HomeScreen extends ConsumerWidget {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Color(0xFF0D1B3E),
-              Color(0xFF020509),
+              Color(0xFF0E1A3D), // Slightly darker deep blue
+              Color(0xFF050B1F), // Very dark blue but still bluish
             ],
-            stops: [0.0, 0.4],
           ),
         ),
         child: SafeArea(
