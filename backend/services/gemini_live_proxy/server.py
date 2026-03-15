@@ -81,6 +81,16 @@ async def _proxy_task(
     try:
         async for message in source:
             try:
+                if label == "client→gemini":
+                    try:
+                        # Log non-binary messages for debugging
+                        if isinstance(message, str):
+                            data = json.loads(message)
+                            # Skip media chunks to avoid log spam
+                            if not (isinstance(data, dict) and "realtime_input" in data and "media_chunks" in data["realtime_input"]):
+                                logger.info("Client Message: %s", json.dumps(data, indent=2))
+                    except Exception:
+                        pass
                 await dest.send(message)
             except Exception as e:
                 logger.warning("Forward error (%s): %s", label, e)
