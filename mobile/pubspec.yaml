@@ -41,10 +41,6 @@ dependencies:
   # Permissions
   permission_handler: ^12.0.1
 
-  # Firebase Auth (anonymous auth)
-  firebase_core: ^4.5.0
-  firebase_auth: ^6.2.0
-
   # HTTP
   http: ^1.2.2
 

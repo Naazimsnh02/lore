@@ -1,17 +1,35 @@
 .agent/
 .agents/
 .claude/
+.kiro/
+CLAUDE.md
 skills/
 skills-lock.json
 setup-and-deployment.md
 
-# Terraform — never commit real variable values or state
-infrastructure/terraform/terraform.tfvars
-infrastructure/terraform/*.tfplan
-infrastructure/terraform/.terraform/
-infrastructure/terraform/.terraform.lock.hcl
-infrastructure/terraform/terraform.tfstate
-infrastructure/terraform/terraform.tfstate.backup
+# Firebase (removed — not used by active screens)
+mobile/lib/firebase_options.dart
+mobile/lib/services/auth_service.dart
+mobile/google-services.json
+mobile/android/app/google-services.json
+mobile/ios/Runner/GoogleService-Info.plist
+
+# Unused backend services (orchestrator layer — bypassed by active screens)
+backend/services/websocket_gateway/
+backend/services/orchestrator/
+backend/services/narration_engine/
+backend/services/search_grounder/
+backend/services/barge_in/
+backend/services/gps_walker/
+backend/services/mode_switch/
+backend/services/sight_mode/
+backend/services/voice_mode/
+backend/services/lore_mode/
+backend/tests/
+backend/pytest.ini
+
+# Terraform — entire folder ignored (infra managed separately)
+infrastructure/terraform/
 
 # Python
 __pycache__/

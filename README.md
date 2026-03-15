@@ -19,13 +19,12 @@ LORE is a multimodal AI app that creates immersive documentary experiences by co
 
 ## Architecture
 
-### Backend (4 services)
+### Backend (3 active services)
 
 ```
 gemini_live_proxy  :8090  — WebSocket proxy to Gemini Live API (all 4 modes)
 nano_illustrator   :8091  — HTTP image generation (VoiceMode + LoreMode)
 veo_generator      :8092  — HTTP video generation (VoiceMode)
-websocket_gateway  :8080  — FastAPI gateway, orchestrator, Sight Mode backend
 ```
 
 ### Mobile (Flutter)
@@ -40,7 +39,6 @@ screens/
 
 services/
   camera_service.dart        — camera frame capture
-  auth_service.dart          — Firebase auth
 ```
 
 ### AI Models
@@ -48,7 +46,6 @@ services/
 | Role | Model |
 |------|-------|
 | Live narration (all modes) | `gemini-2.5-flash-native-audio-preview-12-2025` |
-| Orchestrator / vision | `gemini-3-flash-preview` |
 | Image generation | `gemini-3.1-flash-image-preview` |
 | Video generation | `veo-3.1-generate-preview` |
 
@@ -68,10 +65,10 @@ services/
 
 ```bash
 cp .env.example .env
-# Fill in GEMINI_API_KEY, GOOGLE_MAPS_API_KEY, Firebase keys
+# Fill in GEMINI_API_KEY, GOOGLE_MAPS_API_KEY
 ```
 
-### 2. Start backend services (4 terminals from project root)
+### 2. Start backend services (3 terminals from project root)
 
 ```powershell
 # Terminal 1 — Gemini Live proxy (required for all modes)
@@ -82,9 +79,6 @@ python backend/services/nano_illustrator/image_server.py
 
 # Terminal 3 — Video server (VoiceMode)
 python backend/services/veo_generator/video_server.py
-
-# Terminal 4 — WebSocket gateway (from backend/ directory)
-uvicorn services.websocket_gateway.app:app --host 0.0.0.0 --port 8080 --reload --log-level debug
 ```
 
 ### 3. Configure Flutter
@@ -93,8 +87,7 @@ Create `mobile/dart-defines.json`:
 
 ```json
 {
-  "WEBSOCKET_GATEWAY_URL": "ws://10.0.2.2:8080/ws",
-  "GEMINI_PROXY_URL": "",
+  "GEMINI_PROXY_URL": "ws://10.0.2.2:8090",
   "GOOGLE_MAPS_API_KEY": "<your-maps-api-key>"
 }
 ```
@@ -117,9 +110,9 @@ flutter run --dart-define-from-file=dart-defines.json
 
 ---
 
-## Deployment
+## Setup & Deployment
 
-See [`docs/setup-and-deployment.md`](docs/setup-and-deployment.md) for the full guide including:
+See [`SETUP.md`](SETUP.md) for the full guide including:
 - Cloud Run deployment for all 4 services
 - Secret Manager setup
 - Production dart-defines configuration
@@ -131,7 +124,6 @@ See [`docs/setup-and-deployment.md`](docs/setup-and-deployment.md) for the full 
 lore-gemini-proxy        — wss://lore-gemini-proxy-HASH-uc.a.run.app
 lore-nano-illustrator    — https://lore-nano-illustrator-HASH-uc.a.run.app
 lore-veo-generator       — https://lore-veo-generator-HASH-uc.a.run.app
-lore-websocket-gateway   — wss://lore-websocket-gateway-HASH-uc.a.run.app
 ```
 
 ---
@@ -176,7 +168,6 @@ GEMINI_LIVE_MODEL=gemini-live-2.5-flash-native-audio
 - **Gemini Live API** — real-time bidirectional audio/video/text streaming
 - **Veo 3.1** — cinematic video generation
 - **Flutter** — iOS + Android
-- **FastAPI + uvicorn** — WebSocket gateway
+- **FastAPI + uvicorn** — WebSocket proxy
 - **Google Cloud Run** — auto-scaling serverless backend
-- **Firebase** — authentication
 - **Google Maps Platform** — GPS walking tour map + directions

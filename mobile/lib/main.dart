@@ -3,13 +3,11 @@
 /// Application entry point.
 library;
 
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logging/logging.dart';
 
-import 'firebase_options.dart';
 import 'providers/app_providers.dart';
 import 'screens/home_screen.dart';
 
@@ -30,8 +28,6 @@ void main() async {
     // ignore: avoid_print
     print('[${record.level.name}] ${record.loggerName}: ${record.message}');
   });
-
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   runApp(const ProviderScope(child: LoreApp()));
 }
@@ -75,15 +71,7 @@ class _AppRootState extends ConsumerState<_AppRoot> {
   }
 
   Future<void> _initialise() async {
-    try {
-      // Sign in anonymously so Firebase auth token is available to services
-      // that need it (e.g. websocket_gateway if used).
-      final authService = ref.read(authServiceProvider);
-      await authService.signInAnonymously();
-      setState(() => _ready = true);
-    } catch (e) {
-      setState(() => _error = e.toString());
-    }
+    setState(() => _ready = true);
   }
 
   @override

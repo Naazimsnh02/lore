@@ -23,16 +23,9 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const String _kExplicitProxyUrl = String.fromEnvironment('GEMINI_PROXY_URL', defaultValue: '');
-const String _kGatewayUrl = String.fromEnvironment('WEBSOCKET_GATEWAY_URL', defaultValue: '');
 
 String get _kDefaultProxyUrl {
   if (_kExplicitProxyUrl.isNotEmpty) return _kExplicitProxyUrl;
-  if (_kGatewayUrl.isNotEmpty) {
-    try {
-      final uri = Uri.parse(_kGatewayUrl);
-      return uri.replace(port: 8090, path: '').toString();
-    } catch (_) {}
-  }
   return 'ws://10.0.2.2:8090';
 }
 
