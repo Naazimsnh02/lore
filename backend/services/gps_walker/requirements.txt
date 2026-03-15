@@ -1,7 +1,0 @@
-# GPS Walker service dependencies
-
-# HTTP client for Google Maps Platform and Places API
-aiohttp>=3.9.0
-
-# Data validation
-pydantic>=2.12.0
