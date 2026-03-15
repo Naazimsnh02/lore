@@ -6,11 +6,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/models.dart';
-import '../providers/app_providers.dart';
-import 'sight_mode_screen.dart';
-import 'voice_mode_screen.dart';
 import 'new_voice_mode_screen.dart';
+import 'sight_mode_screen.dart';
 import 'lore_mode_screen.dart';
 import 'new_gps_mode_screen.dart';
 
@@ -19,8 +16,6 @@ class HomeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final session = ref.watch(sessionProvider);
-
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
@@ -28,8 +23,8 @@ class HomeScreen extends ConsumerWidget {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Color(0xFF0D1B3E), // Deep navy blue at top
-              Color(0xFF020509), // Black at bottom
+              Color(0xFF0D1B3E),
+              Color(0xFF020509),
             ],
             stops: [0.0, 0.4],
           ),
@@ -40,11 +35,8 @@ class HomeScreen extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // App header
                 const _LoreHeader(),
                 const SizedBox(height: 48),
-
-                // Mode cards
                 Expanded(
                   child: SingleChildScrollView(
                     physics: const BouncingScrollPhysics(),
@@ -55,7 +47,8 @@ class HomeScreen extends ConsumerWidget {
                           subtitle: 'Point your camera at a landmark',
                           icon: Icons.camera_alt_outlined,
                           backgroundImage: 'assets/images/SightMode.png',
-                          onTap: () => _enterMode(context, ref, LoreMode.sight),
+                          onTap: () => Navigator.push(context,
+                              MaterialPageRoute(builder: (_) => const SightModeScreen())),
                         ),
                         const SizedBox(height: 16),
                         _ModeCard(
@@ -63,10 +56,8 @@ class HomeScreen extends ConsumerWidget {
                           subtitle: 'Speak any topic for an instant documentary',
                           icon: Icons.mic_outlined,
                           backgroundImage: 'assets/images/VoiceMode.png',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const NewVoiceModeScreen()),
-                          ),
+                          onTap: () => Navigator.push(context,
+                              MaterialPageRoute(builder: (_) => const NewVoiceModeScreen())),
                         ),
                         const SizedBox(height: 16),
                         _ModeCard(
@@ -74,7 +65,8 @@ class HomeScreen extends ConsumerWidget {
                           subtitle: 'Camera + Voice fusion — unlocks Alternate History',
                           icon: Icons.auto_awesome_outlined,
                           backgroundImage: 'assets/images/LoreMode.png',
-                          onTap: () => _enterMode(context, ref, LoreMode.lore),
+                          onTap: () => Navigator.push(context,
+                              MaterialPageRoute(builder: (_) => const LoreModeScreen())),
                         ),
                         const SizedBox(height: 16),
                         _ModeCard(
@@ -82,42 +74,18 @@ class HomeScreen extends ConsumerWidget {
                           subtitle: 'Auto-discover landmarks as you walk',
                           icon: Icons.map_outlined,
                           backgroundImage: 'assets/images/GPSMode.png',
-                          onTap: () => _enterGpsWalkingTour(context, ref),
+                          onTap: () => Navigator.push(context,
+                              MaterialPageRoute(builder: (_) => const NewGpsModeScreen())),
                         ),
                       ],
                     ),
                   ),
                 ),
-
-                // Depth dial selector
-                const SizedBox(height: 32),
-                _DepthDialSelector(currentDial: session.depthDial),
-
-                // Connection status indicator
-                const SizedBox(height: 24),
-                _ConnectionStatus(isConnected: session.isConnected),
               ],
             ),
           ),
         ),
       ),
-    );
-  }
-
-  void _enterMode(BuildContext context, WidgetRef ref, LoreMode mode) {
-    ref.read(sessionProvider.notifier).setMode(mode);
-    final screen = switch (mode) {
-      LoreMode.sight => const SightModeScreen(),
-      LoreMode.voice => const VoiceModeScreen(),
-      LoreMode.lore => const LoreModeScreen(),
-    };
-    Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
-  }
-
-  void _enterGpsWalkingTour(BuildContext context, WidgetRef ref) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const NewGpsModeScreen()),
     );
   }
 }
@@ -182,7 +150,7 @@ class _ModeCard extends StatelessWidget {
             fit: BoxFit.cover,
           ),
           border: Border.all(
-            color: Colors.white.withAlpha(51), // 0.2 opacity
+            color: Colors.white.withAlpha(51),
             width: 1.5,
           ),
         ),
@@ -237,112 +205,6 @@ class _ModeCard extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _DepthDialSelector extends ConsumerWidget {
-  final DepthDial currentDial;
-
-  const _DepthDialSelector({required this.currentDial});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Row(
-      children: [
-        Text(
-          'Depth Dial:',
-          style: TextStyle(
-            color: Colors.white.withAlpha(128),
-            fontSize: 16,
-          ),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: DepthDial.values.map((dial) {
-              final selected = dial == currentDial;
-              return Expanded(
-                child: GestureDetector(
-                  onTap: () => ref.read(sessionProvider.notifier).setDepthDial(dial),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 300),
-                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    decoration: BoxDecoration(
-                      color: selected 
-                          ? Colors.white.withAlpha(25) 
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(
-                        color: selected 
-                            ? const Color(0xFF9D50FF) 
-                            : Colors.white.withAlpha(51),
-                        width: 1.5,
-                      ),
-                      boxShadow: selected ? [
-                        BoxShadow(
-                          color: const Color(0xFF9D50FF).withAlpha(102),
-                          blurRadius: 12,
-                          spreadRadius: 1,
-                        )
-                      ] : null,
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      dial.name[0].toUpperCase() + dial.name.substring(1),
-                      style: TextStyle(
-                        color: selected ? Colors.white : Colors.white.withAlpha(178),
-                        fontSize: 14,
-                        fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ConnectionStatus extends StatelessWidget {
-  final bool isConnected;
-
-  const _ConnectionStatus({required this.isConnected});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(
-            color: isConnected ? const Color(0xFF4CAF50) : const Color(0xFFE57373),
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: (isConnected ? const Color(0xFF4CAF50) : const Color(0xFFE57373)).withAlpha(128),
-                blurRadius: 6,
-                spreadRadius: 1,
-              )
-            ],
-          ),
-        ),
-        const SizedBox(width: 12),
-        Text(
-          isConnected ? 'Connected to LORE backend' : 'Disconnected',
-          style: TextStyle(
-            color: (isConnected ? const Color(0xFF4CAF50) : const Color(0xFFE57373)).withAlpha(204),
-            fontSize: 14,
-            letterSpacing: 0.2,
-          ),
-        ),
-      ],
     );
   }
 }

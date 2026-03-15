@@ -1173,19 +1173,6 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
                       icon: const Icon(Icons.arrow_back, color: Colors.white),
                       onPressed: () => Navigator.pop(context),
                     ),
-                    // Connection status dot
-                    Container(
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _connecting
-                            ? Colors.amber
-                            : _connected
-                                ? Colors.greenAccent
-                                : Colors.white24,
-                      ),
-                    ),
                     const Spacer(),
                     // Subtitle toggle
                     IconButton(
@@ -1205,6 +1192,23 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
                           size: 22, color: Colors.white70),
                       tooltip: 'New session',
                       onPressed: _startNewSession,
+                    ),
+                    const SizedBox(width: 4),
+                    // Connection status dot
+                    Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _connecting
+                              ? Colors.amber
+                              : _connected
+                                  ? Colors.greenAccent
+                                  : Colors.white24,
+                        ),
+                      ),
                     ),
                   ],
                 ),

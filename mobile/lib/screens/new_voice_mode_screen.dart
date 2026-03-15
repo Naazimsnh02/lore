@@ -601,8 +601,9 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen> with Ti
         centerTitle: true,
         title: const Text('Voice Mode', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, letterSpacing: 1)),
         actions: [
+          IconButton(icon: const Icon(Icons.add_rounded, size: 22), tooltip: 'New session', onPressed: _startNewSession),
           Padding(
-            padding: const EdgeInsets.only(right: 4),
+            padding: const EdgeInsets.only(right: 12),
             child: Center(
               child: Container(
                 width: 7, height: 7,
@@ -613,7 +614,6 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen> with Ti
               ),
             ),
           ),
-          IconButton(icon: const Icon(Icons.add_rounded, size: 22), tooltip: 'New session', onPressed: _startNewSession),
         ],
       ),
       body: Column(

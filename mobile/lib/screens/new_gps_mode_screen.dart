@@ -12,6 +12,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as dev;
 import 'dart:typed_data';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
@@ -957,20 +958,83 @@ class _NewGpsModeScreenState extends ConsumerState<NewGpsModeScreen>
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Container(
-                decoration: BoxDecoration(color: Colors.black.withAlpha(180), borderRadius: BorderRadius.circular(32)),
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                child: Row(
-                  children: [
-                    IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
-                    const Spacer(),
-                    Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: _connecting ? Colors.amber : _connected ? Colors.greenAccent : Colors.white54)),
-                    const SizedBox(width: 8),
-                    GestureDetector(onTap: () { setState(() => _showTranscript = !_showTranscript); _ChatStore.saveSubtitlePref(_showTranscript); },
-                        child: Icon(_showTranscript ? Icons.subtitles : Icons.subtitles_off, color: _showTranscript ? Colors.greenAccent : Colors.white70, size: 20)),
-                    const SizedBox(width: 4),
-                    IconButton(icon: const Icon(Icons.refresh, color: Colors.white70, size: 20), tooltip: 'New session', onPressed: _startNewSession),
-                  ],
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(32),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white.withAlpha(25),
+                      borderRadius: BorderRadius.circular(32),
+                      border: Border.all(color: Colors.white.withAlpha(30), width: 0.5),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withAlpha(40),
+                          blurRadius: 12,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    child: Row(
+                      children: [
+                        IconButton(
+                            icon: const Icon(Icons.arrow_back,
+                                color: Colors.white,
+                                shadows: [
+                                  Shadow(color: Colors.black54, blurRadius: 4)
+                                ]),
+                            onPressed: () => Navigator.pop(context)),
+                        const Spacer(),
+                        GestureDetector(
+                          onTap: () {
+                            setState(() => _showTranscript = !_showTranscript);
+                            _ChatStore.saveSubtitlePref(_showTranscript);
+                          },
+                          child: Icon(
+                              _showTranscript
+                                  ? Icons.subtitles
+                                  : Icons.subtitles_off,
+                              color: _showTranscript
+                                  ? Colors.greenAccent
+                                  : Colors.white,
+                              shadows: const [
+                                Shadow(color: Colors.black54, blurRadius: 4)
+                              ],
+                              size: 20),
+                        ),
+                        const SizedBox(width: 4),
+                        IconButton(
+                            icon: const Icon(Icons.refresh,
+                                color: Colors.white,
+                                shadows: [
+                                  Shadow(color: Colors.black54, blurRadius: 4)
+                                ],
+                                size: 20),
+                            tooltip: 'New session',
+                            onPressed: _startNewSession),
+                        const SizedBox(width: 4),
+                        // Connection status dot
+                        Padding(
+                          padding: const EdgeInsets.only(right: 12),
+                          child: Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  boxShadow: const [
+                                    BoxShadow(
+                                        color: Colors.black26, blurRadius: 2)
+                                  ],
+                                  color: _connecting
+                                      ? Colors.amber
+                                      : _connected
+                                          ? Colors.greenAccent
+                                          : Colors.white54)),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -1046,16 +1110,70 @@ class _GpsLostBanner extends StatelessWidget {
 }
 
 class _LandmarkCarousel extends StatelessWidget {
-  final List<_Landmark> landmarks; final _Landmark? selected; final void Function(_Landmark) onTap;
-  const _LandmarkCarousel({required this.landmarks, required this.selected, required this.onTap});
+  final List<_Landmark> landmarks;
+  final _Landmark? selected;
+  final void Function(_Landmark) onTap;
+  const _LandmarkCarousel(
+      {required this.landmarks, required this.selected, required this.onTap});
   @override
   Widget build(BuildContext context) {
-    return SizedBox(height: 36, child: ListView.builder(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12), itemCount: landmarks.length, itemBuilder: (_, i) {
-      final lm = landmarks[i]; final isSelected = selected?.name == lm.name;
-      return GestureDetector(onTap: () => onTap(lm), child: Container(margin: const EdgeInsets.only(right: 8), padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(color: Colors.black.withAlpha(180), borderRadius: BorderRadius.circular(20), border: Border.all(color: isSelected ? Colors.white70 : Colors.white24, width: isSelected ? 1.5 : 1)),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.place, color: isSelected ? Colors.white : Colors.white54, size: 12), const SizedBox(width: 5), Text(lm.name, style: TextStyle(color: isSelected ? Colors.white : Colors.white70, fontSize: 12, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal))])));
-    }));
+    return SizedBox(
+        height: 38,
+        child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            itemCount: landmarks.length,
+            itemBuilder: (_, i) {
+              final lm = landmarks[i];
+              final isSelected = selected?.name == lm.name;
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                    child: GestureDetector(
+                        onTap: () => onTap(lm),
+                        child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                                color: isSelected
+                                    ? Colors.greenAccent.withAlpha(80)
+                                    : Colors.black.withAlpha(120),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                    color: isSelected
+                                        ? Colors.greenAccent.withAlpha(160)
+                                        : Colors.white.withAlpha(50),
+                                    width: 1)),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              Icon(Icons.place,
+                                  color: isSelected
+                                      ? Colors.white
+                                      : Colors.white.withAlpha(200),
+                                  shadows: const [
+                                    Shadow(color: Colors.black45, blurRadius: 4)
+                                  ],
+                                  size: 12),
+                              const SizedBox(width: 5),
+                              Text(lm.name,
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      shadows: const [
+                                        Shadow(
+                                            color: Colors.black45,
+                                            blurRadius: 4)
+                                      ],
+                                      fontSize: 12,
+                                      fontWeight: isSelected
+                                          ? FontWeight.w600
+                                          : FontWeight.normal))
+                            ]))),
+                  ),
+                ),
+              );
+            }));
   }
 }
 
@@ -1120,26 +1238,39 @@ class _LocationChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.black.withAlpha(160),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withAlpha(40)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.location_on, color: Colors.greenAccent, size: 14),
-          const SizedBox(width: 5),
-          Flexible(
-            child: Text(
-              name,
-              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
-              overflow: TextOverflow.ellipsis,
-            ),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.black.withAlpha(120),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white.withAlpha(50)),
           ),
-        ],
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.location_on,
+                  color: Colors.greenAccent,
+                  shadows: [Shadow(color: Colors.black45, blurRadius: 4)],
+                  size: 14),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text(
+                  name,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      shadows: [Shadow(color: Colors.black45, blurRadius: 4)],
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

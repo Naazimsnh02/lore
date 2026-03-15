@@ -1,7 +1,6 @@
 /// LORE — The World Is Your Documentary
 ///
 /// Application entry point.
-/// Initialises Firebase, sets up Riverpod, and launches the root widget.
 library;
 
 import 'package:firebase_core/firebase_core.dart';
@@ -12,25 +11,19 @@ import 'package:logging/logging.dart';
 import 'firebase_options.dart';
 import 'providers/app_providers.dart';
 import 'screens/home_screen.dart';
-import 'services/websocket_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Configure structured logging
   Logger.root.level = Level.ALL;
   Logger.root.onRecord.listen((record) {
     // ignore: avoid_print
     print('[${record.level.name}] ${record.loggerName}: ${record.message}');
   });
 
-  // Initialise Firebase (generated credentials in firebase_options.dart)
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  runApp(
-    // ProviderScope is required for all Riverpod providers
-    const ProviderScope(child: LoreApp()),
-  );
+  runApp(const ProviderScope(child: LoreApp()));
 }
 
 class LoreApp extends StatelessWidget {
@@ -54,7 +47,6 @@ class LoreApp extends StatelessWidget {
   }
 }
 
-/// Handles anonymous sign-in before showing the home screen.
 class _AppRoot extends ConsumerStatefulWidget {
   const _AppRoot();
 
@@ -74,36 +66,10 @@ class _AppRootState extends ConsumerState<_AppRoot> {
 
   Future<void> _initialise() async {
     try {
-      // 1. Obtain Firebase anonymous ID token.
+      // Sign in anonymously so Firebase auth token is available to services
+      // that need it (e.g. websocket_gateway if used).
       final authService = ref.read(authServiceProvider);
-      final token = await authService.signInAnonymously();
-
-      // 2. Connect the WebSocket gateway.
-      //    The URL is injected at build time via --dart-define.
-      const gatewayUrl = String.fromEnvironment(
-        'WEBSOCKET_GATEWAY_URL',
-        defaultValue:
-            'ws://10.0.2.2:8080/ws', // Android emulator → host loopback
-      );
-
-      final wsService = ref.read(webSocketServiceProvider);
-
-      // Mirror WsConnected/WsDisconnected into the session notifier so the
-      // home-screen indicator updates correctly.
-      wsService.events.listen((event) {
-        if (!mounted) return;
-        final notifier = ref.read(sessionProvider.notifier);
-        if (event is WsConnectedEvent) {
-          notifier.setConnected(true);
-        } else if (event is WsDisconnectedEvent) {
-          notifier.setConnected(false);
-        }
-      });
-
-      // Use a mock token when the gateway is running in mock-auth mode.
-      final effectiveToken = token ?? 'mock_anonymous';
-      await wsService.connect(gatewayUrl, effectiveToken);
-
+      await authService.signInAnonymously();
       setState(() => _ready = true);
     } catch (e) {
       setState(() => _error = e.toString());
@@ -121,11 +87,7 @@ class _AppRootState extends ConsumerState<_AppRoot> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(
-                  Icons.error_outline,
-                  color: Colors.redAccent,
-                  size: 48,
-                ),
+                const Icon(Icons.error_outline, color: Colors.redAccent, size: 48),
                 const SizedBox(height: 16),
                 Text(
                   'Initialisation failed:\n$_error',
@@ -135,10 +97,7 @@ class _AppRootState extends ConsumerState<_AppRoot> {
                 const SizedBox(height: 24),
                 ElevatedButton(
                   onPressed: () {
-                    setState(() {
-                      _error = null;
-                      _ready = false;
-                    });
+                    setState(() { _error = null; _ready = false; });
                     _initialise();
                   },
                   child: const Text('Retry'),

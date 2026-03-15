@@ -763,19 +763,6 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
                       icon: const Icon(Icons.arrow_back, color: Colors.white),
                       onPressed: () => Navigator.pop(context),
                     ),
-                    // Connection status dot
-                    Container(
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _connecting
-                            ? Colors.amber
-                            : _connected
-                                ? Colors.greenAccent
-                                : Colors.white24,
-                      ),
-                    ),
                     const Spacer(),
                     // Subtitle toggle
                     IconButton(
@@ -788,6 +775,23 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
                       ),
                       tooltip: 'Toggle transcript',
                       onPressed: _toggleSubtitles,
+                    ),
+                    const SizedBox(width: 4),
+                    // Connection status dot
+                    Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _connecting
+                              ? Colors.amber
+                              : _connected
+                                  ? Colors.greenAccent
+                                  : Colors.white24,
+                        ),
+                      ),
                     ),
                   ],
                 ),

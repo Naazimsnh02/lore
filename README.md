@@ -1,386 +1,156 @@
-# LORE - The World Is Your Documentary
+# LORE — The World Is Your Documentary
 
 > Transform physical locations and spoken topics into real-time, AI-generated documentaries
 
-LORE is a multimodal AI application that creates immersive documentary experiences by combining camera vision, conversational AI, video generation, and search-grounded facts. Point your camera at a monument, speak a topic of interest, or combine both to unlock rich multimedia storytelling powered by Google's latest AI technologies.
-
-## 🎯 Overview
-
-LORE operates in three intelligent modes:
-
-- **SightMode**: Point your camera at landmarks and locations to instantly generate documentaries about what you're viewing
-- **VoiceMode**: Speak any topic to receive comprehensive documentary content without visual input
-- **LoreMode**: Combine camera and voice for advanced features like alternate history scenarios and cross-modal queries
-
-## ✨ Key Features
-
-### Core Capabilities
-- **Real-Time Documentary Generation**: Seamless streaming of narration, video clips, illustrations, and verified facts
-- **GPS Walking Tours**: Automatic location-based content as you explore cities and landmarks
-- **Persistent Session Memory**: Build on past explorations with cross-session queries
-- **Multilingual Support**: Documentary narration in 24 languages with cultural adaptation
-
-### Advanced Features
-- **Affective Narration**: AI-generated voice that adapts tone to emotional context (respectful, enthusiastic, contemplative)
-- **Branch Documentaries**: Explore related sub-topics without losing your main thread (up to 3 levels deep)
-- **Historical Character Encounters**: Interact with AI personas from historical periods
-- **Alternate History Mode**: Explore "what if" scenarios grounded in historical facts
-- **Depth Dial**: Adjust content complexity (Explorer/Scholar/Expert) on the fly
-- **Chronicle Export**: Save sessions as illustrated PDF documents with citations
-
-### Intelligence & Quality
-- **Search-Grounded Facts**: All claims verified against authoritative sources with citations
-- **Multi-Agent Orchestration**: Parallel content generation using Google's Agent Development Kit (ADK)
-- **Graceful Degradation**: System continues operating when individual components fail
-- **Barge-In Support**: Interrupt naturally with questions or topic changes
-
-## 🏗️ Architecture
-
-### Technology Stack
-
-**AI & ML**
-- Gemini Live API - Real-time conversational AI with vision and audio
-- Gemini 3 Flash Preview - Multi-agent orchestration via ADK
-- Veo 3.1 - Cinematic video generation (8-60 second clips)
-- Gemini 3.1 Flash Image Preview - Rapid illustration generation
-- Google Search Grounding API - Fact verification with source citations
-
-**Backend Services**
-- Python 3.11+ (asyncio, FastAPI, ADK)
-- Cloud Run - Auto-scaling WebSocket server
-- Cloud Pub/Sub - Asynchronous agent messaging
-- Firestore - Session memory persistence
-- Cloud Storage - Media file storage
-
-**Mobile Frontend**
-- Flutter (iOS + Android)
-- WebSocket client for real-time streaming
-- Camera, microphone, and GPS integration
-
-**Infrastructure**
-- Google Cloud Platform
-- Cloud Logging & Monitoring
-- Google Cloud Identity Platform (authentication)
-- Google Maps Platform + Places API (location services)
-
-### System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Mobile Client (Flutter)                      │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐   │
-│  │  Camera  │  │   Mic    │  │   GPS    │  │ Local Cache  │   │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────────┘   │
-└────────────────────────┬────────────────────────────────────────┘
-                         │ WebSocket
-┌────────────────────────┼────────────────────────────────────────┐
-│              Cloud Run Services (GCP)                            │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │           WebSocket Gateway + Authentication              │  │
-│  └──────────────────────┬───────────────────────────────────┘  │
-└─────────────────────────┼──────────────────────────────────────┘
-                          │
-┌─────────────────────────┼──────────────────────────────────────┐
-│     ADK Orchestrator (Gemini 3 Flash Preview)                   │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  Task Decomposition → Parallel Dispatch → Stream Assembly│  │
-│  └──────────────────────┬───────────────────────────────────┘  │
-└─────────────────────────┼──────────────────────────────────────┘
-                          │
-        ┌─────────────────┼─────────────────┐
-        │                 │                 │
-┌───────▼────────┐ ┌─────▼──────┐ ┌───────▼────────┐
-│   Narration    │ │    Veo     │ │     Nano       │
-│    Engine      │ │  Generator │ │  Illustrator   │
-│ (Gemini Live)  │ │ (Veo 3.1)  │ │  (Gemini 3.1)  │
-└────────────────┘ └────────────┘ └────────────────┘
-        │                 │                 │
-        └─────────────────┼─────────────────┘
-                          │
-┌─────────────────────────┼──────────────────────────────────────┐
-│                   Storage Layer                                  │
-│  ┌──────────────────┐         ┌──────────────────┐             │
-│  │    Firestore     │         │  Cloud Storage   │             │
-│  │ (Session Memory) │         │  (Media Files)   │             │
-│  └──────────────────┘         └──────────────────┘             │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-### Key Design Principles
-
-1. **Real-Time Streaming**: WebSocket-based bidirectional communication for sub-second latency
-2. **Parallel Generation**: ADK orchestrates concurrent execution of all content generation agents
-3. **Graceful Degradation**: System continues with available components when failures occur
-4. **Stateful Sessions**: Persistent memory enables cross-session queries and continuity
-5. **Scalable Infrastructure**: Cloud Run auto-scales from 2 to 100+ instances based on demand
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- Google Cloud Platform account with billing enabled
-- Python 3.11 or higher
-- Flutter SDK 3.0 or higher
-- Node.js 18+ (for development tools)
-
-### Quick Start
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/naazimsnh02/lore.git
-   cd lore
-   ```
-
-2. **Set up Google Cloud Platform**
-   ```bash
-   # Create GCP project
-   gcloud projects create lore-app --name="LORE App"
-   gcloud config set project lore-app
-   
-   # Enable required APIs
-   gcloud services enable \
-     run.googleapis.com \
-     aiplatform.googleapis.com \
-     firestore.googleapis.com \
-     storage.googleapis.com \
-     pubsub.googleapis.com \
-     identitytoolkit.googleapis.com
-   
-   # Set up authentication
-   gcloud auth application-default login
-   ```
-
-3. **Configure infrastructure**
-   ```bash
-   cd infrastructure
-   ./setup.sh
-   ```
-
-4. **Deploy backend services**
-   ```bash
-   cd backend
-   pip install -r requirements.txt
-   ./deploy.sh
-   ```
-
-5. **Run mobile app**
-   ```bash
-   cd mobile
-   flutter pub get
-   flutter run
-   ```
-
-### Configuration
-
-Create a `.env` file in the project root:
-
-```env
-# GCP Configuration
-GCP_PROJECT_ID=your-project-id
-GCP_REGION=us-central1
-
-# API Keys
-GEMINI_API_KEY=your-gemini-api-key
-GOOGLE_MAPS_API_KEY=your-maps-api-key
-
-# Service Endpoints
-WEBSOCKET_URL=wss://your-gateway-url.run.app/ws
-```
-
-## 📖 Documentation
-
-### Project Structure
-
-```
-lore/
-├── backend/
-│   ├── services/
-│   │   ├── orchestrator/       # ADK-based multi-agent coordinator
-│   │   ├── websocket_gateway/  # Real-time communication server
-│   │   ├── narration_engine/   # Gemini Live API integration
-│   │   ├── veo_generator/      # Video generation service
-│   │   ├── nano_illustrator/   # Illustration generation service
-│   │   └── search_grounder/    # Fact verification service
-│   ├── models/                 # Data models and schemas
-│   ├── utils/                  # Shared utilities
-│   └── tests/                  # Unit and integration tests
-├── mobile/
-│   ├── lib/
-│   │   ├── screens/            # UI screens
-│   │   ├── services/           # Device services (camera, mic, GPS)
-│   │   ├── models/             # Data models
-│   │   └── widgets/            # Reusable UI components
-│   └── test/                   # Flutter tests
-├── infrastructure/
-│   ├── terraform/              # Infrastructure as code
-│   └── scripts/                # Deployment scripts
-├── docs/
-│   ├── api/                    # API documentation
-│   ├── architecture/           # Architecture diagrams
-│   └── guides/                 # User and developer guides
-└── .kiro/specs/                # Detailed specifications
-    ├── requirements.md         # 30 functional requirements
-    ├── design.md              # Complete system design
-    └── tasks.md               # Implementation plan
-```
-
-### API Documentation
-
-#### WebSocket Protocol
-
-**Connection**: `wss://your-gateway-url.run.app/ws`
-
-**Authentication**: Bearer token in connection header
-
-**Message Format**: JSON
-
-Example client message:
-```json
-{
-  "type": "mode_select",
-  "payload": {
-    "mode": "sight",
-    "depthDial": "scholar",
-    "language": "en"
-  }
-}
-```
-
-Example server message:
-```json
-{
-  "type": "documentary_content",
-  "payload": {
-    "sequenceId": 1,
-    "contentType": "narration",
-    "content": {
-      "audioUrl": "https://...",
-      "transcript": "Welcome to the Colosseum...",
-      "duration": 15.5,
-      "tone": "enthusiastic"
-    }
-  }
-}
-```
-
-## 🧪 Testing
-
-### Run Unit Tests
-```bash
-# Backend tests
-cd backend
-pytest tests/ -v
-
-# Mobile tests
-cd mobile
-flutter test
-```
-
-### Run Property-Based Tests
-```bash
-# Run all property tests (100+ iterations each)
-pytest tests/properties/ -v --property-tests
-```
-
-### Run Integration Tests
-```bash
-# End-to-end workflow tests
-pytest tests/integration/ -v
-```
-
-### Load Testing
-```bash
-# Simulate 1000+ concurrent users
-cd tests/load
-locust -f locustfile.py --host=wss://your-gateway-url.run.app
-```
-
-## 📊 Performance Metrics
-
-### Latency Targets
-- Input to first output: < 3 seconds
-- Narration start: < 2 seconds
-- WebSocket message: < 100ms
-- Media retrieval: < 500ms (95th percentile)
-- Video generation: 30-60 seconds (background)
-- Illustration generation: < 2 seconds
-
-### Scalability
-- Concurrent users: 1000+ simultaneous connections
-- Auto-scaling: 2-100 Cloud Run instances
-- Session memory: 90-day retention
-- Media storage: Unlimited with quota management
-
-## 🔒 Security & Privacy
-
-### Authentication
-- Google Cloud Identity Platform with OAuth 2.0
-- JWT tokens with 24-hour expiration
-- Role-based access control (RBAC)
-
-### Data Protection
-- Encryption at rest (Google-managed keys)
-- Encryption in transit (TLS 1.3)
-- PII anonymization in logs
-- User-initiated data deletion (GDPR compliant)
-
-### API Security
-- Rate limiting per user and globally
-- Input validation and sanitization
-- CORS restrictions
-- Regular security audits
-
-### Development Workflow
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-### Code Standards
-
-- Python: Follow PEP 8, use type hints
-- Dart/Flutter: Follow official style guide
-- Tests: Maintain 80%+ code coverage
-- Documentation: Update docs for all API changes
-
-## 📝 License
-
-This project is licensed under the MIT License.
-
-## 🙏 Acknowledgments
-
-Built with cutting-edge AI technologies from Google:
-- Gemini Live API for conversational AI
-- Veo 3.1 for video generation
-- Vertex AI for model hosting
-- Google Cloud Platform for infrastructure
-- Agent Development Kit (ADK) for multi-agent orchestration
-
-## 🗺️ Roadmap
-
-### Current Version (v1.0)
-- ✅ Three operating modes (Sight/Voice/Lore)
-- ✅ Real-time documentary streaming
-- ✅ GPS walking tours
-- ✅ Multilingual support (24 languages)
-- ✅ Search-grounded fact verification
-
-### Upcoming Features (v1.1)
-- 🔄 Offline mode with local caching
-- 🔄 Social sharing and collaboration
-- 🔄 Custom documentary templates
-- 🔄 AR overlays for enhanced experiences
-
-### Future Vision (v2.0)
-- 🎯 VR/AR immersive documentaries
-- 🎯 Community-contributed content
-- 🎯 Educational institution partnerships
-- 🎯 Multi-user collaborative exploration
+LORE is a multimodal AI app that creates immersive documentary experiences by combining live camera vision, conversational AI, video generation, and search-grounded facts — powered by Google's Gemini Live API.
 
 ---
 
-**Made with ❤️ by the LORE Team**
+## Modes
 
-*Transforming the world into your personal documentary, one location at a time.*
+| Mode | What it does |
+|------|-------------|
+| SightMode | Point your camera at a landmark — Gemini narrates what it sees in real time |
+| VoiceMode | Speak any topic — get narration, AI-generated images, and Veo video clips |
+| LoreMode | Camera + voice + GPS fusion — full documentary with location awareness |
+| GPS Walking Tour | Walk around a city — Gemini auto-discovers landmarks and narrates as you move |
+
+---
+
+## Architecture
+
+### Backend (4 services)
+
+```
+gemini_live_proxy  :8090  — WebSocket proxy to Gemini Live API (all 4 modes)
+nano_illustrator   :8091  — HTTP image generation (VoiceMode + LoreMode)
+veo_generator      :8092  — HTTP video generation (VoiceMode)
+websocket_gateway  :8080  — FastAPI gateway, orchestrator, Sight Mode backend
+```
+
+### Mobile (Flutter)
+
+```
+screens/
+  home_screen.dart           — mode selection
+  sight_mode_screen.dart     — live camera + audio → Gemini Live
+  new_voice_mode_screen.dart — voice + image/video generation
+  lore_mode_screen.dart      — camera + voice + GPS → Gemini Live
+  new_gps_mode_screen.dart   — GPS walking tour + Directions API
+
+services/
+  camera_service.dart        — camera frame capture
+  auth_service.dart          — Firebase auth
+```
+
+### AI Models
+
+| Role | Model |
+|------|-------|
+| Live narration (all modes) | `gemini-2.5-flash-native-audio-preview-12-2025` |
+| Orchestrator / vision | `gemini-3-flash-preview` |
+| Image generation | `gemini-3.1-flash-image-preview` |
+| Video generation | `veo-3.1-generate-preview` |
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.11+
+- Flutter 3.x
+- Google Cloud SDK (`gcloud`)
+- A `GEMINI_API_KEY` from [AI Studio](https://aistudio.google.com/apikey)
+- A Google Maps API key (for GPS mode)
+
+### 1. Configure environment
+
+```bash
+cp .env.example .env
+# Fill in GEMINI_API_KEY, GOOGLE_MAPS_API_KEY, Firebase keys
+```
+
+### 2. Start backend services (4 terminals from project root)
+
+```powershell
+# Terminal 1 — Gemini Live proxy (required for all modes)
+python backend/services/gemini_live_proxy/server.py
+
+# Terminal 2 — Image server (VoiceMode + LoreMode)
+python backend/services/nano_illustrator/image_server.py
+
+# Terminal 3 — Video server (VoiceMode)
+python backend/services/veo_generator/video_server.py
+
+# Terminal 4 — WebSocket gateway (from backend/ directory)
+uvicorn services.websocket_gateway.app:app --host 0.0.0.0 --port 8080 --reload --log-level debug
+```
+
+### 3. Configure Flutter
+
+Create `mobile/dart-defines.json`:
+
+```json
+{
+  "WEBSOCKET_GATEWAY_URL": "ws://10.0.2.2:8080/ws",
+  "GEMINI_PROXY_URL": "",
+  "GOOGLE_MAPS_API_KEY": "<your-maps-api-key>"
+}
+```
+
+Add to `mobile/android/local.properties`:
+
+```properties
+GOOGLE_MAPS_API_KEY=<your-maps-api-key>
+```
+
+### 4. Run the app
+
+```bash
+cd mobile
+flutter pub get
+flutter run --dart-define-from-file=dart-defines.json
+```
+
+> Use your machine's LAN IP instead of `10.0.2.2` when running on a physical device.
+
+---
+
+## Deployment
+
+See [`docs/setup-and-deployment.md`](docs/setup-and-deployment.md) for the full guide including:
+- Cloud Run deployment for all 4 services
+- Secret Manager setup
+- Production dart-defines configuration
+- Pre-publish checklist
+
+### Services deployed to Cloud Run
+
+```
+lore-gemini-proxy        — wss://lore-gemini-proxy-HASH-uc.a.run.app
+lore-nano-illustrator    — https://lore-nano-illustrator-HASH-uc.a.run.app
+lore-veo-generator       — https://lore-veo-generator-HASH-uc.a.run.app
+lore-websocket-gateway   — wss://lore-websocket-gateway-HASH-uc.a.run.app
+```
+
+---
+
+## Notes
+
+- **Veo video with audio** requires Vertex AI (`GOOGLE_GENAI_USE_VERTEXAI=true`). AI Studio produces video without audio.
+- **GPS mode** requires a physical device — emulator GPS is unreliable.
+- **Local dev** uses AI Studio by default. Do not set `GCP_PROJECT_ID` in `dart-defines.json` for local dev.
+- The Maps API key appears in `AndroidManifest.xml` by design (required by Maps SDK) — restrict it by Android app signature in GCP Console.
+
+---
+
+## Tech Stack
+
+- **Gemini Live API** — real-time bidirectional audio/video/text streaming
+- **Veo 3.1** — cinematic video generation
+- **Flutter** — iOS + Android
+- **FastAPI + uvicorn** — WebSocket gateway
+- **Google Cloud Run** — auto-scaling serverless backend
+- **Firebase** — authentication
+- **Google Maps Platform** — GPS walking tour map + directions
