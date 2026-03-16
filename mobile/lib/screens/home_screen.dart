@@ -42,12 +42,12 @@ class HomeScreen extends ConsumerWidget {
                     child: Column(
                       children: [
                         _ModeCard(
-                          title: 'SightMode',
-                          subtitle: 'Point your camera at a landmark',
-                          icon: Icons.camera_alt_outlined,
-                          backgroundImage: 'assets/images/SightMode.png',
+                          title: 'LoreMode',
+                          subtitle: 'Camera + Voice fusion — unlocks Alternate History',
+                          icon: Icons.auto_awesome_outlined,
+                          backgroundImage: 'assets/images/LoreMode.png',
                           onTap: () => Navigator.push(context,
-                              MaterialPageRoute(builder: (_) => const SightModeScreen())),
+                              MaterialPageRoute(builder: (_) => const LoreModeScreen())),
                         ),
                         const SizedBox(height: 16),
                         _ModeCard(
@@ -60,16 +60,16 @@ class HomeScreen extends ConsumerWidget {
                         ),
                         const SizedBox(height: 16),
                         _ModeCard(
-                          title: 'LoreMode',
-                          subtitle: 'Camera + Voice fusion — unlocks Alternate History',
-                          icon: Icons.auto_awesome_outlined,
-                          backgroundImage: 'assets/images/LoreMode.png',
+                          title: 'SightMode',
+                          subtitle: 'Point your camera at a landmark',
+                          icon: Icons.camera_alt_outlined,
+                          backgroundImage: 'assets/images/SightMode.png',
                           onTap: () => Navigator.push(context,
-                              MaterialPageRoute(builder: (_) => const LoreModeScreen())),
+                              MaterialPageRoute(builder: (_) => const SightModeScreen())),
                         ),
                         const SizedBox(height: 16),
                         _ModeCard(
-                          title: 'GPS Walking Tour',
+                          title: 'GPS Tracking',
                           subtitle: 'Auto-discover landmarks as you walk',
                           icon: Icons.map_outlined,
                           backgroundImage: 'assets/images/GPSMode.png',

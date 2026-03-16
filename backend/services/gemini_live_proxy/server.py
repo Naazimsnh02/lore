@@ -97,8 +97,9 @@ async def _proxy_task(
                         # Log non-binary messages for debugging
                         if isinstance(message, str):
                             data = json.loads(message)
-                            # Skip media chunks to avoid log spam
-                            if not (isinstance(data, dict) and "realtime_input" in data and "media_chunks" in data["realtime_input"]):
+                            # Skip media/video frames to avoid log spam
+                            ri = data.get("realtime_input", {}) if isinstance(data, dict) else {}
+                            if not (isinstance(data, dict) and "realtime_input" in data and ("media_chunks" in ri or "video" in ri or "audio" in ri)):
                                 logger.info("Client Message: %s", json.dumps(data, indent=2))
                     except Exception:
                         pass
@@ -136,6 +137,7 @@ async def _create_proxy(
             service_url,
             additional_headers=headers,
             ssl=ssl_ctx,
+            max_size=8 * 1024 * 1024,  # 8 MB — handles image/video frames
         ) as gemini_ws:
             logger.info("Connected to Gemini Live API")
 
@@ -229,7 +231,7 @@ async def main() -> None:
 ║  Mode: {mode:<44} ║
 ╚══════════════════════════════════════════════════════╝
 """)
-    async with websockets.serve(_handle_client, "0.0.0.0", WS_PORT):
+    async with websockets.serve(_handle_client, "0.0.0.0", WS_PORT, max_size=8 * 1024 * 1024):
         logger.info("Proxy listening on ws://0.0.0.0:%d", WS_PORT)
         await asyncio.Future()  # run forever
 

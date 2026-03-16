@@ -46,6 +46,11 @@ mobile/.flutter-plugins
 mobile/.flutter-plugins-dependencies
 mobile/build/
 
+# Android signing — never commit keystore or passwords
+mobile/android/key.properties
+mobile/android/app/*.jks
+mobile/android/app/*.keystore
+
 # GCP credentials
 *.json
 !package.json
@@ -53,4 +58,4 @@ mobile/build/
 
 # Documentation
 docs/
-
+demo-video/

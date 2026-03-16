@@ -30,10 +30,10 @@ LORE has 4 modes, all designed to use the Gemini Live API directly:
 
 | Mode | Screen | Connects to |
 |------|--------|-------------|
-| SightMode | `sight_mode_screen.dart` | Gemini Live proxy (8090) |
-| VoiceMode | `new_voice_mode_screen.dart` | Gemini Live proxy (8090) + image server (8091) + video server (8092) |
 | LoreMode | `lore_mode_screen.dart` | Gemini Live proxy (8090) + image server (8091) |
-| GPS Walking Tour | `new_gps_mode_screen.dart` | Gemini Live proxy (8090) + Google Directions API |
+| VoiceMode | `new_voice_mode_screen.dart` | Gemini Live proxy (8090) + image server (8091) + video server (8092) |
+| SightMode | `sight_mode_screen.dart` | Gemini Live proxy (8090) |
+| GPS Tracking mode | `new_gps_mode_screen.dart` | Gemini Live proxy (8090) + Google Directions API |
 
 ### Backend services (active)
 

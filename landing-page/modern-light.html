@@ -413,6 +413,7 @@
         <button class="nav-link" onclick="scrollToSection('Experience')">Experience</button>
         <button class="nav-link" onclick="scrollToSection('Architecture')">Architecture</button>
         <button class="nav-link" onclick="scrollToSection('Stack')">Stack</button>
+        <a href="https://youtu.be/jkc9dAexUZs" target="_blank" class="nav-link" style="color: var(--accent); font-weight: 700;">Watch Demo</a>
     </div>
     <span class="nav-badge">LORE v1.0 — LIVE AGENT</span>
 </nav>
@@ -438,6 +439,9 @@
         <div class="hero-cta">
             <button class="btn-primary" onclick="scrollToSection('Modes')">Explore Modes</button>
             <button class="btn-outline" onclick="scrollToSection('Architecture')">View Architecture</button>
+            <a href="https://youtu.be/jkc9dAexUZs" target="_blank" class="btn-outline" style="text-decoration: none; display: inline-flex; align-items: center; gap: 8px;">
+                <span>▶</span> Watch Demo
+            </a>
         </div>
     </div>
 
@@ -456,9 +460,9 @@
 
         <div class="modes-tabs" id="modes-tabs">
             <button class="mode-tab active" onclick="setMode(0)">
-                <div class="mode-tab-icon">📷</div>
-                <div class="mode-tab-name">SightMode</div>
-                <div class="mode-tab-sub">Visual Intelligence</div>
+                <div class="mode-tab-icon">✦</div>
+                <div class="mode-tab-name">LoreMode</div>
+                <div class="mode-tab-sub">The Fusion</div>
             </button>
             <button class="mode-tab" onclick="setMode(1)">
                 <div class="mode-tab-icon">🎙️</div>
@@ -466,13 +470,13 @@
                 <div class="mode-tab-sub">Conversational DNA</div>
             </button>
             <button class="mode-tab" onclick="setMode(2)">
-                <div class="mode-tab-icon">✦</div>
-                <div class="mode-tab-name">LoreMode</div>
-                <div class="mode-tab-sub">The Fusion</div>
+                <div class="mode-tab-icon">📷</div>
+                <div class="mode-tab-name">SightMode</div>
+                <div class="mode-tab-sub">Visual Intelligence</div>
             </button>
             <button class="mode-tab" onclick="setMode(3)">
                 <div class="mode-tab-icon">📍</div>
-                <div class="mode-tab-name">GPS Tour</div>
+                <div class="mode-tab-name">GPS Tracking</div>
                 <div class="mode-tab-sub">Spatial Awareness</div>
             </button>
         </div>
@@ -634,7 +638,7 @@
                         <span class="stack-badge">NAV</span>
                         <span class="stack-name">Google Directions API</span>
                     </div>
-                    <span class="stack-role">Walking navigation for GPS Walking Tours</span>
+                    <span class="stack-role">Walking navigation for GPS Tracking mode</span>
                 </div>
                 <div class="stack-item">
                     <div class="stack-item-left">
@@ -730,17 +734,17 @@
     // --- Modes data ---
     const MODES = [
         {
-            color: '#b8722a', colorBg: '#fdf5ec', colorBorder: '#f0d4a8',
-            tagline: 'Point. See. Understand.',
-            desc: 'Your camera becomes a portal into history. Point at any monument or building and LORE instantly recognises it via Gemini Live vision and GPS grounding. It begins generating a narrated documentary with high-fidelity illustrations streaming in real time.',
+            color: '#8a6a1a', colorBg: '#faf4e4', colorBorder: '#d4c080',
+            tagline: 'See + Ask = Something New.',
+            desc: 'The ultimate breakthrough: Camera AND voice simultaneously. LORE sees where you are AND hears your question — then generates a response that fuses both. This unlocks Alternate History scenarios grounded in your real location.',
             steps: [
-                { icon: '📷', label: 'Camera captures live frames (1fps)' },
-                { icon: '🌍', label: 'GPS context grounds the model' },
-                { icon: '🎙️', label: 'Gemini Live streams narration' },
-                { icon: '🖼️', label: 'Gemini 3.1 Flash Image generates imagery' },
+                { icon: '📷', label: 'Camera streams visual context' },
+                { icon: '🗣️', label: 'Voice question adds intent' },
+                { icon: '⚡', label: 'Gemini fuses both inputs' },
+                { icon: '✨', label: 'Reality + imagination combined' },
             ],
-            narration: '"You are standing where 40,000 soldiers fought in 1764. The ground beneath you absorbed the blood of three empires..."',
-            feature: 'LIVE VISION — Continuous multimodal recognition fused with authoritative historical data.'
+            narration: '"Standing at the Colosseum, you ask: what if Rome never fell? LORE generates an alternate-history film shot against your real backdrop."',
+            feature: 'ALTERNATE HISTORY — Ground any historical "what if?" in the real place you\'re standing for maximum immersive impact.'
         },
         {
             color: '#3a7a5a', colorBg: '#eef6f1', colorBorder: '#b0d4c0',
@@ -756,30 +760,30 @@
             feature: 'INSTANT DOCS — Transform any spoken topic into a cinematic narrative with no preparation.'
         },
         {
-            color: '#8a6a1a', colorBg: '#faf4e4', colorBorder: '#d4c080',
-            tagline: 'See + Ask = Something New.',
-            desc: 'The ultimate breakthrough: Camera AND voice simultaneously. LORE sees where you are AND hears your question — then generates a response that fuses both. This unlocks Alternate History scenarios grounded in your real location.',
+            color: '#b8722a', colorBg: '#fdf5ec', colorBorder: '#f0d4a8',
+            tagline: 'Point. See. Understand.',
+            desc: 'Your camera becomes a portal into history. Point at any monument or building and LORE instantly recognises it via Gemini Live vision and GPS grounding. It begins generating a narrated documentary with high-fidelity illustrations streaming in real time.',
             steps: [
-                { icon: '📷', label: 'Camera streams visual context' },
-                { icon: '🗣️', label: 'Voice question adds intent' },
-                { icon: '⚡', label: 'Gemini fuses both inputs' },
-                { icon: '✨', label: 'Reality + imagination combined' },
+                { icon: '📷', label: 'Camera captures live frames (1fps)' },
+                { icon: '🌍', label: 'GPS context grounds the model' },
+                { icon: '🎙️', label: 'Gemini Live streams narration' },
+                { icon: '🖼️', label: 'Gemini 3.1 Flash Image generates imagery' },
             ],
-            narration: '"Standing at the Colosseum, you ask: what if Rome never fell? LORE generates an alternate-history film shot against your real backdrop."',
-            feature: 'ALTERNATE HISTORY — Ground any historical "what if?" in the real place you\'re standing for maximum immersive impact.'
+            narration: '"You are standing where 40,000 soldiers fought in 1764. The ground beneath you absorbed the blood of three empires..."',
+            feature: 'LIVE VISION — Continuous multimodal recognition fused with authoritative historical data.'
         },
         {
             color: '#2a6a7a', colorBg: '#eef4f6', colorBorder: '#a8ccd4',
             tagline: 'Walk. Discover. Listen.',
-            desc: 'Experience the history of your city as you walk through it. LORE tracks your position and auto-triggers narrations when you move significantly or approach a landmark. Includes full Google Directions navigation.',
+            desc: 'Experience the history of your city as you walk through it. LORE tracks your position and auto-triggers narrations when you move significantly or approach a landmark. The live map view is shared with Gemini every 5 seconds so it can see your surroundings and active route. Includes full Google Directions navigation.',
             steps: [
                 { icon: '📍', label: 'GPS tracks real-time location' },
-                { icon: '🗺️', label: 'Maps SDK identifies landmarks' },
+                { icon: '🗺️', label: 'Live map screen shared with Gemini (5s)' },
                 { icon: '↪️', label: 'Directions API guides your path' },
                 { icon: '🎙️', label: 'Auto-triggers on significant movement' },
             ],
             narration: '"As you approach the fountain, notice the marks on the central pillar. These were left during the Great Fire of 1888..."',
-            feature: 'HANDS-FREE DISCOVERY — The world narrates itself to you as you move, with landmarks automatically appearing on your map.'
+            feature: 'HANDS-FREE DISCOVERY — The live map is continuously shared with Gemini so it sees your route, landmarks, and surroundings as you walk.'
         }
     ];
 

@@ -111,7 +111,7 @@ class _ChatMsg {
   Uint8List? imageBytes;
   String? imageMime;
   String? videoUrl;
-  final _ChatMsgKind kind;
+  _ChatMsgKind kind;
   final DateTime timestamp;
 
   _ChatMsg({
@@ -216,6 +216,7 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen> with Ti
   bool _feeding = false;
 
   final List<_ChatMsg> _messages = [];
+  final Set<String> _pendingGenerations = {};
   final ScrollController _scrollCtrl = ScrollController();
   bool _lastUserMsgFinished = true;
   bool _lastAssistantMsgFinished = true;
@@ -269,6 +270,7 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen> with Ti
     if (_disposed || _connecting || _connected) return;
     if (mounted) setState(() => _connecting = true);
     try {
+      if (!_pcmReady) await _initPcm();
       final ws = WebSocketChannel.connect(Uri.parse(_kDefaultProxyUrl));
       await ws.ready;
       if (_disposed) { ws.sink.close(); return; }
@@ -355,6 +357,7 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen> with Ti
     _wsSub?.cancel(); _wsSub = null;
     _ws?.sink.close(); _ws = null;
     _connected = false; _recording = false;
+    _pcmReady = false;
     _feedQueue.clear();
     try { FlutterPcmSound.release(); } catch (_) {}
   }
@@ -399,6 +402,7 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen> with Ti
       final name = c['name'] as String? ?? '';
       final id = c['id'] as String? ?? '';
       final prompt = (c['args'] as Map<String, dynamic>?)?['prompt'] as String? ?? '';
+      if (_pendingGenerations.contains(id)) continue;
       if (name == 'generate_image') {
         final loadingId = _addLoadingMsg('Generating image...');
         _runGenerateImage(id, prompt, loadingId);
@@ -419,11 +423,35 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen> with Ti
     return id;
   }
 
-  void _removeLoadingMsg(String id) {
-    if (mounted && !_disposed) setState(() => _messages.removeWhere((m) => m.id == id));
+  // Updates the loading bubble in-place so it is never lost from the list.
+  void _resolveLoadingMsg(String id, {
+    Uint8List? imageBytes,
+    String? imageMime,
+    String? videoUrl,
+    bool remove = false,
+  }) {
+    if (!mounted || _disposed) return;
+    setState(() {
+      final idx = _messages.indexWhere((m) => m.id == id);
+      if (idx == -1) return;
+      if (remove) { _messages.removeAt(idx); return; }
+      final m = _messages[idx];
+      if (imageBytes != null) {
+        m.imageBytes = imageBytes;
+        m.imageMime = imageMime;
+        m.kind = _ChatMsgKind.image;
+        m.text = '';
+      } else if (videoUrl != null) {
+        m.videoUrl = videoUrl;
+        m.kind = _ChatMsgKind.video;
+        m.text = '';
+      }
+    });
   }
 
   Future<void> _runGenerateImage(String callId, String prompt, String loadingId) async {
+    if (_pendingGenerations.contains(callId)) return;
+    _pendingGenerations.add(callId);
     try {
       final resp = await http.post(
         Uri.parse(_kIllustratorUrl),
@@ -431,15 +459,12 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen> with Ti
         body: json.encode({'prompt': prompt}),
       ).timeout(const Duration(seconds: 60));
 
-      _removeLoadingMsg(loadingId);
-
       if (resp.statusCode == 200) {
         final body = json.decode(resp.body) as Map<String, dynamic>;
         final b64 = body['image_base64'] as String?;
         final mime = body['mime_type'] as String? ?? 'image/png';
         if (b64 != null && b64.isNotEmpty) {
-          final msg = _ChatMsg(id: '${DateTime.now().microsecondsSinceEpoch}', isUser: false, text: '', imageBytes: base64Decode(b64), imageMime: mime, kind: _ChatMsgKind.image);
-          if (mounted && !_disposed) setState(() => _messages.add(msg));
+          _resolveLoadingMsg(loadingId, imageBytes: base64Decode(b64), imageMime: mime);
           _scrollToBottom();
           _saveSession();
           _wsSend({'tool_response': {'function_responses': [{'id': callId, 'name': 'generate_image', 'response': {'result': 'Image generated successfully.'}}]}});
@@ -448,12 +473,16 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen> with Ti
       }
       throw Exception('HTTP ${resp.statusCode}');
     } catch (e) {
-      _removeLoadingMsg(loadingId);
+      _resolveLoadingMsg(loadingId, remove: true);
       _wsSend({'tool_response': {'function_responses': [{'id': callId, 'name': 'generate_image', 'response': {'error': e.toString()}}]}});
+    } finally {
+      _pendingGenerations.remove(callId);
     }
   }
 
   Future<void> _runGenerateVideo(String callId, String prompt, String loadingId) async {
+    if (_pendingGenerations.contains(callId)) return;
+    _pendingGenerations.add(callId);
     try {
       final resp = await http.post(
         Uri.parse(_kVideoGeneratorUrl),
@@ -461,14 +490,11 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen> with Ti
         body: json.encode({'prompt': prompt}),
       ).timeout(const Duration(minutes: 4));
 
-      _removeLoadingMsg(loadingId);
-
       if (resp.statusCode == 200) {
         final body = json.decode(resp.body) as Map<String, dynamic>;
         final videoUrl = body['video_url'] as String?;
         if (videoUrl != null && videoUrl.isNotEmpty) {
-          final msg = _ChatMsg(id: '${DateTime.now().microsecondsSinceEpoch}', isUser: false, text: '', videoUrl: videoUrl, kind: _ChatMsgKind.video);
-          if (mounted && !_disposed) setState(() => _messages.add(msg));
+          _resolveLoadingMsg(loadingId, videoUrl: videoUrl);
           _scrollToBottom();
           _saveSession();
           _wsSend({'tool_response': {'function_responses': [{'id': callId, 'name': 'generate_video', 'response': {'result': 'Video generated successfully.'}}]}});
@@ -477,8 +503,10 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen> with Ti
       }
       throw Exception('HTTP ${resp.statusCode}');
     } catch (e) {
-      _removeLoadingMsg(loadingId);
+      _resolveLoadingMsg(loadingId, remove: true);
       _wsSend({'tool_response': {'function_responses': [{'id': callId, 'name': 'generate_video', 'response': {'error': e.toString()}}]}});
+    } finally {
+      _pendingGenerations.remove(callId);
     }
   }
 
@@ -540,11 +568,15 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen> with Ti
     _feedQueue.clear();
     try {
       await FlutterPcmSound.release();
+      _pcmReady = false;
       await FlutterPcmSound.setup(sampleRate: 24000, channelCount: 1);
       await FlutterPcmSound.setLogLevel(LogLevel.none);
       FlutterPcmSound.setFeedThreshold(960);
       FlutterPcmSound.setFeedCallback((_) {});
-    } catch (_) {}
+      _pcmReady = true;
+    } catch (_) {
+      _pcmReady = false;
+    }
     if (mounted && !_disposed) setState(() => _playing = false);
   }
 
@@ -599,9 +631,9 @@ class _NewVoiceModeScreenState extends ConsumerState<NewVoiceModeScreen> with Ti
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0A1A0A),
+      backgroundColor: const Color(0xFF050B1F),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0A1A0A),
+        backgroundColor: const Color(0xFF050B1F),
         foregroundColor: Colors.white,
         centerTitle: true,
         title: const Text('Voice Mode', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, letterSpacing: 1)),
@@ -684,15 +716,15 @@ class _ChatBubble extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
         decoration: BoxDecoration(
-          color: msg.isUser ? Colors.greenAccent.withAlpha(40) : Colors.white.withAlpha(12),
+          color: msg.isUser ? Colors.blueAccent.withAlpha(40) : Colors.white.withAlpha(12),
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(16), topRight: const Radius.circular(16),
             bottomLeft: Radius.circular(msg.isUser ? 16 : 4),
             bottomRight: Radius.circular(msg.isUser ? 4 : 16),
           ),
-          border: Border.all(color: msg.isUser ? Colors.greenAccent.withAlpha(60) : Colors.white.withAlpha(15)),
+          border: Border.all(color: msg.isUser ? Colors.blueAccent.withAlpha(60) : Colors.white.withAlpha(15)),
         ),
-        child: Text(msg.text, style: TextStyle(color: msg.isUser ? Colors.greenAccent : Colors.white, fontSize: 14)),
+        child: Text(msg.text, style: TextStyle(color: msg.isUser ? Colors.blueAccent : Colors.white, fontSize: 14)),
       ),
     );
   }
@@ -730,7 +762,7 @@ class _LoadingRowState extends State<_LoadingRow> with SingleTickerProviderState
               animation: _ctrl,
               builder: (_, __) => CircularProgressIndicator(
                 value: null, strokeWidth: 1.5,
-                color: Colors.greenAccent.withAlpha(180),
+                color: Colors.blueAccent.withAlpha(180),
               ),
             ),
           ),
@@ -748,14 +780,14 @@ Future<void> _showLoreDialog(BuildContext context, {required String title, requi
   return showDialog(
     context: context,
     builder: (_) => AlertDialog(
-      backgroundColor: const Color(0xFF0F2010),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: Colors.greenAccent.withAlpha(60))),
+      backgroundColor: const Color(0xFF0E1A3D),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: Colors.blueAccent.withAlpha(60))),
       title: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
       content: Text(message, style: const TextStyle(color: Colors.white70, fontSize: 13)),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('OK', style: TextStyle(color: Colors.greenAccent)),
+          child: const Text('OK', style: TextStyle(color: Colors.blueAccent)),
         ),
       ],
     ),
@@ -880,7 +912,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
         child: _error
             ? const Padding(padding: EdgeInsets.all(16), child: Text('Video unavailable', style: TextStyle(color: Colors.white38, fontSize: 12)))
             : !_initialized
-                ? SizedBox(height: width * 9 / 16, child: const Center(child: CircularProgressIndicator(color: Colors.greenAccent, strokeWidth: 2)))
+                ? SizedBox(height: width * 9 / 16, child: const Center(child: CircularProgressIndicator(color: Colors.blueAccent, strokeWidth: 2)))
                 : Stack(
                     children: [
                       AspectRatio(aspectRatio: _ctrl.value.aspectRatio, child: VideoPlayer(_ctrl)),
@@ -910,7 +942,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
                       Positioned(
                         bottom: 0, left: 0, right: 0,
                         child: VideoProgressIndicator(_ctrl, allowScrubbing: true,
-                          colors: const VideoProgressColors(playedColor: Colors.greenAccent, bufferedColor: Colors.white24, backgroundColor: Colors.white12)),
+                          colors: const VideoProgressColors(playedColor: Colors.blueAccent, bufferedColor: Colors.white24, backgroundColor: Colors.white12)),
                       ),
                     ],
                   ),
@@ -1010,7 +1042,7 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
           Center(
             child: _initialized
                 ? AspectRatio(aspectRatio: _ctrl.value.aspectRatio, child: VideoPlayer(_ctrl))
-                : const CircularProgressIndicator(color: Colors.greenAccent),
+                : const CircularProgressIndicator(color: Colors.blueAccent),
           ),
           if (_initialized) ...[
             Positioned.fill(child: GestureDetector(onTap: () => setState(() { _ctrl.value.isPlaying ? _ctrl.pause() : _ctrl.play(); }))),
@@ -1023,7 +1055,7 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
                     onPressed: () => setState(() { _ctrl.value.isPlaying ? _ctrl.pause() : _ctrl.play(); }),
                   ),
                   Expanded(child: VideoProgressIndicator(_ctrl, allowScrubbing: true,
-                    colors: const VideoProgressColors(playedColor: Colors.greenAccent, bufferedColor: Colors.white24, backgroundColor: Colors.white12))),
+                    colors: const VideoProgressColors(playedColor: Colors.blueAccent, bufferedColor: Colors.white24, backgroundColor: Colors.white12))),
                 ],
               ),
             ),
@@ -1056,7 +1088,7 @@ class _WaveformBar extends StatelessWidget {
       height: 48,
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFF0A1A0A), // Match the screen background
+        color: const Color(0xFF050B1F), // Match the screen background
         borderRadius: BorderRadius.circular(10),
       ),
       child: AnimatedBuilder(
@@ -1084,7 +1116,7 @@ class _WavePainter extends CustomPainter {
           ? (math.sin((n * math.pi * 4) + t * math.pi * 2) * 0.5 + math.sin((n * math.pi * 6) + t * math.pi * 3) * 0.3).abs()
           : 0.05;
       final h = math.max(2.0, amp * size.height * 0.7);
-      paint.color = Color.lerp(Colors.greenAccent.withAlpha(30), Colors.greenAccent, active ? amp.clamp(0.0, 1.0) : 0.1)!;
+      paint.color = Color.lerp(Colors.blueAccent.withAlpha(30), Colors.blueAccent, active ? amp.clamp(0.0, 1.0) : 0.1)!;
       canvas.drawRRect(
         RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(i * bw + bw / 2, cy), width: bw * 0.5, height: h), const Radius.circular(2)),
         paint,
@@ -1111,7 +1143,7 @@ class _MicButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = recording ? Colors.redAccent : connected ? Colors.greenAccent : Colors.white38;
+    final color = recording ? Colors.redAccent : connected ? Colors.blueAccent : Colors.white38;
     return GestureDetector(
       onTap: connecting ? null : onTap,
       child: AnimatedBuilder(
@@ -1128,10 +1160,12 @@ class _MicButton extends StatelessWidget {
           child: connecting
               ? const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54)))
               : playing && !recording
-                  ? const Center(child: Icon(Icons.volume_up_rounded, color: Colors.greenAccent, size: 28))
+                  ? const Center(child: Icon(Icons.volume_up_rounded, color: Colors.blueAccent, size: 28))
                   : Icon(recording ? Icons.stop_rounded : Icons.mic_rounded, color: color, size: 32),
         ),
       ),
     );
   }
 }
+
+

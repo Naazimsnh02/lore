@@ -168,7 +168,7 @@ class _ChatMsg {
   Uint8List? imageBytes;
   String? imageMime;
   String? videoUrl;
-  final _ChatMsgKind kind;
+  _ChatMsgKind kind;
   final DateTime timestamp;
 
   _ChatMsg({
@@ -324,6 +324,7 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
 
   // ── Chat ───────────────────────────────────────────────────────────────────
   final List<_ChatMsg> _messages = [];
+  final Set<String> _pendingGenerations = {};
   final ScrollController _scrollCtrl = ScrollController();
   bool _lastUserMsgFinished = true;
   bool _lastAssistantMsgFinished = true;
@@ -612,49 +613,47 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
           'parts': [
             {
               'text':
-                  'You are LORE, an immersive AI documentary narrator and expert guide. '
-                  'You have access to a live camera feed and the user\'s voice simultaneously. '
-                  'You also receive GPS coordinates as [GPS: lat=..., lon=..., accuracy=...m, address="..."] '
-                  'context messages — use these silently to enrich your narration. Never read them out.\n\n'
-                  'HOW TO RESPOND:\n'
-                  'Combine what you see through the camera with what the user says to deliver rich, '
-                  'cinematic documentary narration — like a BBC or National Geographic film about the '
-                  'exact place they are standing in. Lead with identity and significance. '
-                  'Name the subject confidently. Deliver the most compelling facts, history, and context '
-                  'a knowledgeable local expert would share. Keep responses to 3-5 sentences. '
-                  'Never start with "I can see..." or "In this image..." — jump straight to the subject. '
-                  'Always respond in English.\n\n'
+                  'You are LORE, the ultimate immersive documentary experience. '
+                  'This is the most powerful mode — you fuse live camera vision, the user\'s voice, '
+                  'and GPS location to create a cinematic, deeply personal documentary.\n\n'
+                  'INPUTS YOU HAVE:\n'
+                  '- Live camera feed (what the user is looking at right now).\n'
+                  '- The user\'s voice questions and topics.\n'
+                  '- GPS context as [GPS: lat=..., lon=..., accuracy=...m, address="..."] messages. '
+                  'Use the address silently to enrich your narration. Never read out GPS messages.\n\n'
+                  'RESPONSE PRIORITY (follow this order):\n'
+                  '1. DEFAULT — Grounded documentary narration. Combine what you see in the camera '
+                  'with the user\'s topic and GPS context. Name the subject confidently. '
+                  'Deliver 2-4 sentences of compelling facts, history, and context. '
+                  'Never start with "I can see..." — jump straight to the subject.\n'
+                  '2. ALTERNATE HISTORY — If the user asks "what if", "imagine if", or "suppose", '
+                  'engage fully and creatively. Explore the counterfactual with authority and vividness. '
+                  'Ground it in the real place they are standing in. Make it feel real.\n'
+                  '3. HISTORICAL CHARACTERS — If the user is at a historically significant location '
+                  'and invites immersion (e.g., "who lived here", "tell me as if you were there"), '
+                  'briefly narrate in the voice of a relevant historical figure (1-2 sentences). '
+                  'Always make clear it is a dramatic interpretation. Use this sparingly — only when '
+                  'it strongly fits the place.\n\n'
                   'WHAT TO COVER:\n'
-                  '- Landmarks and buildings: name, age, who built it and why, architectural style, '
-                  'historical events, cultural significance.\n'
+                  '- Landmarks and buildings: name, age, builder, architectural style, historical events.\n'
                   '- Natural features: geological formation, ecological significance, local legends.\n'
-                  '- Art and sculptures: artist, period, technique, symbolism, the story behind it.\n'
+                  '- Art and sculptures: artist, period, technique, symbolism.\n'
                   '- Streets and neighbourhoods: history, famous residents, key events.\n\n'
-                  'ALTERNATE HISTORY:\n'
-                  'When the user asks "what if", "imagine if", or "suppose" — engage fully and creatively. '
-                  'Explore the counterfactual with authority and vividness. Make it feel real. '
-                  'Always call generate_image immediately after alternate history narration. '
-                  'For dramatic scenarios involving motion, call generate_video instead.\n\n'
-                  'HISTORICAL CHARACTERS:\n'
-                  'At historically significant locations, you may briefly narrate in the voice of a '
-                  'relevant historical figure to bring the place to life — always making clear it is '
-                  'a dramatic interpretation. After speaking as a historical figure, call generate_image.\n\n'
                   'VISUAL STORYTELLING:\n'
-                  'After every narration about a landmark, historical figure, natural wonder, architectural '
-                  'marvel, civilisation, artwork, or cultural scene — call generate_image immediately. '
-                  'After any alternate history response — call generate_image (or generate_video for motion). '
-                  'After any historical character narration — call generate_image. '
-                  'Skip generate_image only if you already generated one in the last 2 turns.\n\n'
+                  'If your narration covers a visually rich subject and no image was generated in the '
+                  'last 2 turns, call generate_image. Always call generate_image after alternate history '
+                  'or historical character narration. Call at most one visual tool per turn.\n\n'
                   'TOOL RULES:\n'
-                  '1. generate_image — call after every visually rich narration, every alternate history '
-                  'response, and every historical character moment. Also call when the user says "show", '
-                  '"image", "picture", "draw", "illustrate", or "what does it look like". '
+                  '1. generate_image — call for visually compelling narration, alternate history, '
+                  'historical character moments, or when the user says "show", "image", "picture", '
+                  '"draw", or "illustrate". '
                   'Write a detailed cinematic prompt: subject, lighting, style, era, mood.\n'
-                  '2. generate_video — call when the user says "video", "animate", "motion", "footage", '
-                  '"clip", or "bring it to life". Also for dramatic alternate history involving movement, '
-                  'battles, eruptions, migrations, storms, and ceremonies. '
-                  'Before calling, say: "Generating your video now — this takes about 60 to 90 seconds."\n\n'
-                  'IMPORTANT: When a tool is needed, call it immediately. '
+                  '2. generate_video — call when the user explicitly says "video", "animate", "motion", '
+                  '"footage", "clip", or "bring it to life". Also for dramatic alternate history '
+                  'involving movement (battles, eruptions, storms). '
+                  'Before calling, say: "Generating your video now — this takes about 60 to 90 seconds." '
+                  'Do not call both generate_image and generate_video in the same turn.\n\n'
+                  'Always respond in English. '
                   'Never output <think>, <thinking>, or <tool_use> tags.',
             }
           ],
@@ -795,6 +794,7 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
       final id = c['id'] as String? ?? '';
       final prompt =
           (c['args'] as Map<String, dynamic>?)?['prompt'] as String? ?? '';
+      if (_pendingGenerations.contains(id)) continue;
       if (name == 'generate_image') {
         final loadingId = _addLoadingMsg('Generating image...');
         _runGenerateImage(id, prompt, loadingId);
@@ -816,14 +816,36 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
     return id;
   }
 
-  void _removeLoadingMsg(String id) {
-    if (mounted && !_disposed) {
-      setState(() => _messages.removeWhere((m) => m.id == id));
-    }
+  // Updates the loading bubble in-place so it is never lost from the list.
+  void _resolveLoadingMsg(String id, {
+    Uint8List? imageBytes,
+    String? imageMime,
+    String? videoUrl,
+    bool remove = false,
+  }) {
+    if (!mounted || _disposed) return;
+    setState(() {
+      final idx = _messages.indexWhere((m) => m.id == id);
+      if (idx == -1) return;
+      if (remove) { _messages.removeAt(idx); return; }
+      final m = _messages[idx];
+      if (imageBytes != null) {
+        m.imageBytes = imageBytes;
+        m.imageMime = imageMime;
+        m.kind = _ChatMsgKind.image;
+        m.text = '';
+      } else if (videoUrl != null) {
+        m.videoUrl = videoUrl;
+        m.kind = _ChatMsgKind.video;
+        m.text = '';
+      }
+    });
   }
 
   Future<void> _runGenerateImage(
       String callId, String prompt, String loadingId) async {
+    if (_pendingGenerations.contains(callId)) return;
+    _pendingGenerations.add(callId);
     try {
       final resp = await http
           .post(
@@ -833,22 +855,12 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
           )
           .timeout(const Duration(seconds: 60));
 
-      _removeLoadingMsg(loadingId);
-
       if (resp.statusCode == 200) {
         final body = json.decode(resp.body) as Map<String, dynamic>;
         final b64 = body['image_base64'] as String?;
         final mime = body['mime_type'] as String? ?? 'image/png';
         if (b64 != null && b64.isNotEmpty) {
-          final msg = _ChatMsg(
-            id: '${DateTime.now().microsecondsSinceEpoch}',
-            isUser: false,
-            text: '',
-            imageBytes: base64Decode(b64),
-            imageMime: mime,
-            kind: _ChatMsgKind.image,
-          );
-          if (mounted && !_disposed) setState(() => _messages.add(msg));
+          _resolveLoadingMsg(loadingId, imageBytes: base64Decode(b64), imageMime: mime);
           _scrollToBottom();
           _saveSession();
           _wsSend({
@@ -867,7 +879,7 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
       }
       throw Exception('HTTP ${resp.statusCode}');
     } catch (e) {
-      _removeLoadingMsg(loadingId);
+      _resolveLoadingMsg(loadingId, remove: true);
       _wsSend({
         'tool_response': {
           'function_responses': [
@@ -879,11 +891,15 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
           ]
         }
       });
+    } finally {
+      _pendingGenerations.remove(callId);
     }
   }
 
   Future<void> _runGenerateVideo(
       String callId, String prompt, String loadingId) async {
+    if (_pendingGenerations.contains(callId)) return;
+    _pendingGenerations.add(callId);
     final host = Uri.parse(_kDefaultProxyUrl).host;
     try {
       final resp = await http
@@ -894,20 +910,11 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
           )
           .timeout(const Duration(minutes: 4));
 
-      _removeLoadingMsg(loadingId);
-
       if (resp.statusCode == 200) {
         final body = json.decode(resp.body) as Map<String, dynamic>;
         final videoUrl = body['video_url'] as String?;
         if (videoUrl != null && videoUrl.isNotEmpty) {
-          final msg = _ChatMsg(
-            id: '${DateTime.now().microsecondsSinceEpoch}',
-            isUser: false,
-            text: '',
-            videoUrl: videoUrl,
-            kind: _ChatMsgKind.video,
-          );
-          if (mounted && !_disposed) setState(() => _messages.add(msg));
+          _resolveLoadingMsg(loadingId, videoUrl: videoUrl);
           _scrollToBottom();
           _saveSession();
           _wsSend({
@@ -926,7 +933,7 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
       }
       throw Exception('HTTP ${resp.statusCode}');
     } catch (e) {
-      _removeLoadingMsg(loadingId);
+      _resolveLoadingMsg(loadingId, remove: true);
       _wsSend({
         'tool_response': {
           'function_responses': [
@@ -938,6 +945,8 @@ class _LoreModeScreenState extends ConsumerState<LoreModeScreen>
           ]
         }
       });
+    } finally {
+      _pendingGenerations.remove(callId);
     }
   }
 

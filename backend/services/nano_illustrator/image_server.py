@@ -80,11 +80,18 @@ async def handle_generate(request: web.Request) -> web.Response:
 
         print(f"Generating image for prompt: {prompt[:80]}...")
 
+        # Use JPEG output to reduce payload size and transfer time.
+        # Quality 85 is a good balance; set IMAGE_OUTPUT_QUALITY in .env to override.
+        output_quality = int(os.getenv("IMAGE_OUTPUT_QUALITY", "85"))
         response = await client.aio.models.generate_content(
             model=MODEL_ID,
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_modalities=["IMAGE", "TEXT"],
+                image_config=types.ImageConfig(
+                    output_mime_type="image/jpeg",
+                    output_compression_quality=output_quality,
+                ),
             ),
         )
 

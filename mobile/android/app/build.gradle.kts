@@ -1,14 +1,20 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-import java.util.Properties
-
 // Read local.properties to inject secrets as manifest placeholders
 val localProps = Properties().also { props ->
     val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { props.load(it) }
+}
+
+// Read key.properties for release signing
+val keyProps = Properties().also { props ->
+    val f = rootProject.file("key.properties")
     if (f.exists()) f.inputStream().use { props.load(it) }
 }
 
@@ -26,6 +32,15 @@ android {
         jvmTarget = "17"
     }
 
+    signingConfigs {
+        create("release") {
+            keyAlias = keyProps.getProperty("keyAlias")
+            keyPassword = keyProps.getProperty("keyPassword")
+            storeFile = keyProps.getProperty("storeFile")?.let { rootProject.file(it) }
+            storePassword = keyProps.getProperty("storePassword")
+        }
+    }
+
     defaultConfig {
         applicationId = "com.lore.lore_documentary"
         minSdk = flutter.minSdkVersion
@@ -38,7 +53,7 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }

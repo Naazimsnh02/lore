@@ -166,6 +166,12 @@ async def handle_generate(request: web.Request) -> web.Response:
 
         loop = asyncio.get_event_loop()
 
+        # Resolution and duration are the main latency levers:
+        # resolution: "720p" < "1080p" < "4k" (speed vs quality)
+        # duration_seconds: 4 | 6 | 8 (shorter = faster)
+        video_resolution = os.getenv("VEO_RESOLUTION", "720p")
+        video_duration = os.getenv("VEO_DURATION_SECONDS", "5")
+
         operation = await loop.run_in_executor(
             None,
             lambda: client.models.generate_videos(
@@ -174,7 +180,8 @@ async def handle_generate(request: web.Request) -> web.Response:
                 config=types.GenerateVideosConfig(
                     aspect_ratio="16:9",
                     number_of_videos=1,
-                    duration_seconds="8",
+                    duration_seconds=video_duration,
+                    resolution=video_resolution,
                 ),
             ),
         )
@@ -209,7 +216,7 @@ async def handle_generate(request: web.Request) -> web.Response:
                 sep = "&" if "?" in url else "?"
                 playable_url = f"{url}{sep}key={GEMINI_API_KEY}"
             print(f"Video ready: {url[:80]}")
-            return web.json_response({"video_url": playable_url, "duration": 8}, headers=_CORS)
+            return web.json_response({"video_url": playable_url, "duration": int(video_duration)}, headers=_CORS)
 
         return web.json_response(
             {"error": "No video returned from model"},

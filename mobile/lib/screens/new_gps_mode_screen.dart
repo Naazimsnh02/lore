@@ -55,6 +55,7 @@ String get _modelUri {
 const _kPrefSubtitles = 'gps_subtitles';
 const _kDirectionsApiUrl =
     'https://maps.googleapis.com/maps/api/directions/json';
+const _kNearbySearchUrl = 'https://places.googleapis.com/v1/places:searchNearby';
 
 // ── Location tag parser ───────────────────────────────────────────────────────
 
@@ -157,8 +158,24 @@ class _Landmark {
   final String name;
   final LatLng? position;
   final DateTime discoveredAt;
+  final String? address;
+  final double? rating;
+  final int? userRatingCount;
+  final String? primaryType;
+  final List<String> types;
+  final bool fromNearbySearch;
 
-  const _Landmark({required this.name, this.position, required this.discoveredAt});
+  const _Landmark({
+    required this.name,
+    this.position,
+    required this.discoveredAt,
+    this.address,
+    this.rating,
+    this.userRatingCount,
+    this.primaryType,
+    this.types = const [],
+    this.fromNearbySearch = false,
+  });
 }
 
 // ── Directions result ─────────────────────────────────────────────────────────
@@ -257,12 +274,15 @@ class _NewGpsModeScreenState extends ConsumerState<NewGpsModeScreen>
   final Set<Marker> _markers = {};
   final Set<Polyline> _polylines = {};
   bool _followUser = true;
+  Timer? _mapSnapshotTimer;
 
   // ── Landmarks (discovered via [LOCATION:] tags) ────────────────────────────
   final List<_Landmark> _landmarks = [];
   _Landmark? _selectedLandmark;
   _DirectionsResult? _currentDirections;
   bool _loadingDirections = false;
+  bool _loadingNearby = false;
+  LatLng? _lastFetchedCenter;
 
   // ── Mic ────────────────────────────────────────────────────────────────────
   final AudioRecorder _recorder = AudioRecorder();
@@ -448,6 +468,44 @@ class _NewGpsModeScreenState extends ConsumerState<NewGpsModeScreen>
     _sendLocationContext(_lastPosition!, turnComplete: turnComplete);
   }
 
+  /// Captures a snapshot of the current map view, resizes it to 512px wide,
+  /// and sends it to Gemini as a realtime_input video frame.
+  Future<void> _sendMapSnapshot() async {
+    if (!_connected || _disposed || _mapController == null) return;
+    try {
+      final snapshot = await _mapController!.takeSnapshot();
+      if (snapshot == null || snapshot.isEmpty || _disposed || !_connected) return;
+
+      // Resize to 512px wide so the base64-encoded frame stays well under
+      // the Gemini Live API 1 MB WebSocket frame limit.
+      final codec = await instantiateImageCodec(snapshot, targetWidth: 512);
+      final frame = await codec.getNextFrame();
+      final byteData = await frame.image.toByteData(format: ImageByteFormat.png);
+      frame.image.dispose();
+      codec.dispose();
+
+      if (byteData == null || _disposed || !_connected) return;
+      final resized = byteData.buffer.asUint8List();
+
+      _wsSend({
+        'realtime_input': {
+          'video': {'mime_type': 'image/png', 'data': base64Encode(resized)},
+        }
+      });
+    } catch (e) {
+      dev.log('[GPS-MODE] map snapshot failed: $e', name: 'GpsMode');
+    }
+  }
+
+  void _startMapSnapshotTimer() {
+    _mapSnapshotTimer?.cancel();
+    // Send a map screenshot every 5 seconds so Gemini can see the current map state.
+    // Max 1 FPS supported; 0.2 FPS (5s) is conservative and avoids hitting session limits.
+    _mapSnapshotTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _sendMapSnapshot();
+    });
+  }
+
   void _startGpsStream() {
     dev.log('[GPS-MODE] starting GPS stream', name: 'GpsMode');
     const settings = LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 10);
@@ -462,6 +520,7 @@ class _NewGpsModeScreenState extends ConsumerState<NewGpsModeScreen>
 
         if (isFirstFix && _mapController != null) {
           _mapController!.animateCamera(CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 16));
+          _fetchNearbyLandmarks(pos);
         } else if (_followUser && _mapController != null) {
           _mapController!.animateCamera(CameraUpdate.newLatLng(LatLng(pos.latitude, pos.longitude)));
         }
@@ -493,6 +552,7 @@ class _NewGpsModeScreenState extends ConsumerState<NewGpsModeScreen>
     _disposed = true;
     _gpsLostTimer?.cancel();
     _gpsContextTimer?.cancel();
+    _mapSnapshotTimer?.cancel();
     _gpsSub?.cancel();
     _mapController?.dispose();
     _disconnectCleanup();
@@ -554,31 +614,38 @@ class _NewGpsModeScreenState extends ConsumerState<NewGpsModeScreen>
           'parts': [
             {
               'text':
-                  'You are LORE GPS, an AI walking tour guide and documentary narrator. '
-                  'You receive the user\'s real-time GPS location as [GPS: lat=..., lon=..., accuracy=...m, address="..."] messages.\n\n'
+                  'You are LORE GPS, an AI walking tour guide. '
+                  'You guide the user through their surroundings using real-time GPS location.\n\n'
+                  'INPUTS YOU HAVE:\n'
+                  '- GPS location as [GPS: lat=..., lon=..., accuracy=...m, address="..."] messages.\n'
+                  '- The user\'s voice questions.\n'
+                  '- A live screenshot of the Google Maps view, sent every 5 seconds as a video frame. '
+                  'The map shows the user\'s blue dot position, nearby landmark markers, and any active route polyline. '
+                  'Use the map to understand where the user is, what\'s around them, and what route they are on.\n'
+                  '- You do not have camera access. You do not generate images or videos in this mode.\n\n'
                   'THE ADDRESS IS GROUND TRUTH:\n'
                   'The address field tells you exactly where the user is. If it says "Chennai, Tamil Nadu, India" — '
                   'the user is in Chennai. Never assume or guess a different location. '
                   'The address overrides anything from your training data.\n\n'
-                  'GPS MESSAGES ARE SILENT:\n'
+                  'WHEN TO SPEAK:\n'
                   'When you receive a [GPS: ...] message, silently update your location awareness. '
-                  'Do not speak unless:\n'
+                  'Speak only when:\n'
                   '1. The user asks you something directly.\n'
                   '2. The user moves within about 50 metres of a truly significant landmark — a famous monument, '
                   'historic site, or major attraction — that you have not already narrated this session.\n'
-                  'For all other GPS updates, stay completely silent.\n\n'
+                  'For all other GPS updates, stay completely silent. '
+                  'If there is no clearly notable landmark nearby, stay silent until asked.\n\n'
                   'WHEN YOU NARRATE:\n'
-                  'Use the address to identify the most interesting landmark or point of interest nearby. '
-                  'Lead with identity and significance — name the place confidently. '
-                  'Deliver the most compelling facts and context a knowledgeable local would share. '
-                  'Keep responses to 3-5 sentences. Never repeat a location you already narrated this session. '
+                  'Name the place confidently. Deliver 2-4 sentences of compelling facts and context '
+                  'a knowledgeable local would share. Never repeat a location you already narrated this session. '
                   'Always respond in English.\n\n'
+                  'LOCATION TAGGING:\n'
+                  'Every time you narrate about a named place, append [LOCATION: <name>] at the very end '
+                  'of your response as metadata. Do not weave it into the spoken narration.\n\n'
                   'NAVIGATION:\n'
                   'You do not provide turn-by-turn directions — the app handles that. '
-                  'When the user asks to go somewhere, call navigate_to with the destination name.\n\n'
-                  'LOCATION TAGGING:\n'
-                  'Every time you narrate about a named place, include [LOCATION: <name>] in your response. '
-                  'This is required — it adds the place to the map.\n\n'
+                  'When the user asks to go somewhere, call navigate_to with the destination name. '
+                  'If the destination is ambiguous, ask one short clarifying question before calling navigate_to.\n\n'
                   'TOOL RULES:\n'
                   '1. navigate_to — call when the user asks for directions or to go somewhere.\n\n'
                   'Never output <think>, <thinking>, or <tool_use> tags.',
@@ -616,6 +683,7 @@ class _NewGpsModeScreenState extends ConsumerState<NewGpsModeScreen>
 
   void _disconnectCleanup() {
     _gpsContextTimer?.cancel();
+    _mapSnapshotTimer?.cancel();
     _recorder.stop();
     _recordSub?.cancel(); _recordSub = null;
     _wsSub?.cancel(); _wsSub = null;
@@ -640,6 +708,7 @@ class _NewGpsModeScreenState extends ConsumerState<NewGpsModeScreen>
       switch (msg.type) {
         case _GeminiMsgType.setupComplete:
           _setupCompleter?.complete();
+          _startMapSnapshotTimer();
         case _GeminiMsgType.audio:
           if (msg.audioBase64 != null && msg.audioBase64!.isNotEmpty) {
             _playPcmChunk(base64Decode(msg.audioBase64!));
@@ -683,24 +752,194 @@ class _NewGpsModeScreenState extends ConsumerState<NewGpsModeScreen>
     _appendTranscript(cleaned, isUser: false, finished: finished);
   }
 
+  Future<void> _fetchNearbyLandmarks(Position pos) =>
+      _fetchLandmarksAtPosition(pos.latitude, pos.longitude);
+
+  Future<void> _fetchLandmarksAtPosition(double lat, double lng) async {
+    if (_kMapsApiKey.isEmpty || _loadingNearby) return;
+    // Skip if we already fetched within 500 m of this centre
+    if (_lastFetchedCenter != null) {
+      final dist = Geolocator.distanceBetween(
+          _lastFetchedCenter!.latitude, _lastFetchedCenter!.longitude, lat, lng);
+      if (dist < 500) return;
+    }
+    _loadingNearby = true;
+    _lastFetchedCenter = LatLng(lat, lng);
+
+    try {
+      final body = json.encode({
+        'includedTypes': [
+          'tourist_attraction',
+          'museum',
+          'historical_landmark',
+          'cultural_landmark',
+          'monument',
+          'park',
+          'art_gallery',
+          'church',
+          'hindu_temple',
+          'mosque',
+          'national_park',
+          'zoo',
+          'aquarium',
+          'amusement_park',
+          'castle',
+          'historical_place',
+        ],
+        'maxResultCount': 20,
+        'rankPreference': 'DISTANCE',
+        'locationRestriction': {
+          'circle': {
+            'center': {
+              'latitude': lat,
+              'longitude': lng,
+            },
+            'radius': 2000.0,
+          },
+        },
+      });
+
+      final resp = await http.post(
+        Uri.parse(_kNearbySearchUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': _kMapsApiKey,
+          'X-Goog-FieldMask':
+              'places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.primaryType,places.types',
+        },
+        body: body,
+      ).timeout(const Duration(seconds: 10));
+
+      if (resp.statusCode != 200) {
+        dev.log('[GPS-MODE] Nearby search failed: HTTP ${resp.statusCode} ${resp.body}', name: 'GpsMode');
+        return;
+      }
+
+      final data = json.decode(resp.body) as Map<String, dynamic>;
+      final places = data['places'] as List<dynamic>? ?? [];
+
+      if (mounted && !_disposed) {
+        setState(() {
+          for (final place in places) {
+            final p = place as Map<String, dynamic>;
+            final displayName = (p['displayName'] as Map<String, dynamic>?)?['text'] as String? ?? '';
+            if (displayName.isEmpty) continue;
+            if (_landmarks.any((l) => l.name.toLowerCase() == displayName.toLowerCase())) continue;
+
+            final location = p['location'] as Map<String, dynamic>?;
+            final placeLat = location?['latitude'] as double?;
+            final placeLng = location?['longitude'] as double?;
+            final latLng = (placeLat != null && placeLng != null) ? LatLng(placeLat, placeLng) : null;
+
+            final landmark = _Landmark(
+              name: displayName,
+              position: latLng,
+              discoveredAt: DateTime.now(),
+              address: p['formattedAddress'] as String?,
+              rating: (p['rating'] as num?)?.toDouble(),
+              userRatingCount: p['userRatingCount'] as int?,
+              primaryType: p['primaryType'] as String?,
+              types: (p['types'] as List<dynamic>?)?.cast<String>() ?? [],
+              fromNearbySearch: true,
+            );
+            _landmarks.add(landmark);
+
+            if (latLng != null) {
+              final markerId = MarkerId('nearby_${_landmarks.length}');
+              _markers.add(Marker(
+                markerId: markerId,
+                position: latLng,
+                infoWindow: InfoWindow(title: displayName, snippet: landmark.address ?? ''),
+                icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+                onTap: () => _onMarkerTapped(landmark),
+              ));
+            }
+          }
+        });
+      }
+      dev.log('[GPS-MODE] Loaded ${places.length} nearby landmarks', name: 'GpsMode');
+    } catch (e) {
+      dev.log('[GPS-MODE] Nearby search error: $e', name: 'GpsMode');
+    } finally {
+      _loadingNearby = false;
+    }
+  }
+
+  void _onMarkerTapped(_Landmark landmark) {
+    if (!mounted || _disposed) return;
+    setState(() => _selectedLandmark = landmark);
+    _showLandmarkDetailSheet(landmark);
+    _injectLandmarkContext(landmark);
+  }
+
+  /// Silently injects landmark metadata into the Gemini session so the AI
+  /// can give a rich, accurate answer when the user asks about the tapped pin.
+  void _injectLandmarkContext(_Landmark landmark) {
+    if (!_connected || _disposed) return;
+    final parts = <String>['User tapped "${landmark.name}" on the map.'];
+    if (landmark.address != null) parts.add('Address: ${landmark.address}.');
+    if (landmark.primaryType != null) {
+      parts.add('Type: ${landmark.primaryType!.replaceAll('_', ' ')}.');
+    }
+    if (landmark.rating != null) {
+      parts.add('Rating: ${landmark.rating}/5 (${landmark.userRatingCount ?? 0} reviews).');
+    }
+    final others = _landmarks
+        .where((l) => l.name != landmark.name)
+        .map((l) => l.name)
+        .take(8)
+        .join(', ');
+    if (others.isNotEmpty) parts.add('Other visible landmarks on map: $others.');
+    parts.add('Answer the user\'s next question with a detailed documentary-style response specifically about ${landmark.name}.');
+    _wsSend({
+      'client_content': {
+        'turns': [
+          {'role': 'user', 'parts': [{'text': '[MAP_CONTEXT: ${parts.join(' ')}]'}]}
+        ],
+        'turn_complete': false,
+      }
+    });
+  }
+
+  void _showLandmarkDetailSheet(_Landmark landmark) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _LandmarkDetailSheet(
+        landmark: landmark,
+        onNavigate: () {
+          Navigator.pop(context);
+          _onLandmarkCardTap(landmark);
+        },
+        onClose: () => Navigator.pop(context),
+      ),
+    );
+  }
+
   void _registerLandmark(String name) {
     if (_landmarks.any((l) => l.name.toLowerCase() == name.toLowerCase())) return;
-    final landmark = _Landmark(name: name, discoveredAt: DateTime.now());
-    final landmarkIndex = _landmarks.length; // capture index before adding
+    final landmark = _Landmark(
+      name: name,
+      position: _lastPosition != null
+          ? LatLng(_lastPosition!.latitude, _lastPosition!.longitude)
+          : null,
+      discoveredAt: DateTime.now(),
+    );
+    final landmarkIndex = _landmarks.length;
     if (mounted && !_disposed) {
       setState(() => _landmarks.add(landmark));
     }
-    if (_lastPosition != null) {
-      final pos = LatLng(_lastPosition!.latitude, _lastPosition!.longitude);
+    if (landmark.position != null) {
       final markerId = MarkerId('landmark_$landmarkIndex');
       if (mounted && !_disposed) {
         setState(() {
           _markers.add(Marker(
             markerId: markerId,
-            position: pos,
+            position: landmark.position!,
             infoWindow: InfoWindow(title: name),
             icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
-            onTap: () => _onLandmarkCardTap(landmark),
+            onTap: () => _onMarkerTapped(landmark),
           ));
         });
       }
@@ -728,15 +967,36 @@ class _NewGpsModeScreenState extends ConsumerState<NewGpsModeScreen>
 
   void _runNavigateTo(String destination) {
     if (destination.isEmpty) return;
-    _Landmark landmark;
     final existing = _landmarks.where((l) => l.name.toLowerCase() == destination.toLowerCase());
     if (existing.isNotEmpty) {
-      landmark = existing.first;
+      final landmark = existing.first;
+      _onLandmarkCardTap(landmark);
+      if (landmark.position != null) {
+        _highlightLandmarkMarker(landmark);
+      }
     } else {
-      landmark = _Landmark(name: destination, discoveredAt: DateTime.now());
+      final landmark = _Landmark(name: destination, discoveredAt: DateTime.now());
       if (mounted && !_disposed) setState(() => _landmarks.add(landmark));
+      _onLandmarkCardTap(landmark);
     }
-    _onLandmarkCardTap(landmark);
+  }
+
+  void _highlightLandmarkMarker(_Landmark landmark) {
+    if (landmark.position == null || !mounted || _disposed) return;
+    setState(() {
+      // Remove any old highlight marker
+      _markers.removeWhere((m) => m.markerId.value == 'highlighted');
+      _markers.add(Marker(
+        markerId: const MarkerId('highlighted'),
+        position: landmark.position!,
+        infoWindow: InfoWindow(title: '📍 ${landmark.name}', snippet: 'Navigating here'),
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+        zIndexInt: 2,
+        onTap: () => _onMarkerTapped(landmark),
+      ));
+    });
+    _mapController?.showMarkerInfoWindow(const MarkerId('highlighted'));
+    _mapController?.animateCamera(CameraUpdate.newLatLngZoom(landmark.position!, 16));
   }
 
   // ── Google Directions API ─────────────────────────────────────────────────
@@ -774,8 +1034,15 @@ class _NewGpsModeScreenState extends ConsumerState<NewGpsModeScreen>
           _polylines.clear();
           _polylines.add(Polyline(polylineId: const PolylineId('route'), points: polylinePoints, color: Colors.blueAccent, width: 5));
           if (polylinePoints.isNotEmpty) {
-            _markers.removeWhere((m) => m.markerId.value == 'destination');
-            _markers.add(Marker(markerId: const MarkerId('destination'), position: polylinePoints.last, infoWindow: InfoWindow(title: landmark.name), icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen)));
+            _markers.removeWhere((m) => m.markerId.value == 'destination' || m.markerId.value == 'highlighted');
+            _markers.add(Marker(
+              markerId: const MarkerId('destination'),
+              position: polylinePoints.last,
+              infoWindow: InfoWindow(title: '📍 ${landmark.name}', snippet: '${_currentDirections?.distanceText ?? ''} · ${_currentDirections?.durationText ?? ''}'),
+              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+              zIndexInt: 2,
+              onTap: () => _onMarkerTapped(landmark),
+            ));
           }
           _followUser = false;
         });
@@ -817,12 +1084,15 @@ class _NewGpsModeScreenState extends ConsumerState<NewGpsModeScreen>
   void _onLandmarkCardTap(_Landmark landmark) {
     setState(() { _selectedLandmark = landmark; });
     _fetchDirections(landmark);
+    if (landmark.position != null) {
+      _highlightLandmarkMarker(landmark);
+    }
   }
 
   void _clearDirections() {
     setState(() {
       _selectedLandmark = null; _currentDirections = null; _polylines.clear();
-      _markers.removeWhere((m) => m.markerId.value == 'destination');
+      _markers.removeWhere((m) => m.markerId.value == 'destination' || m.markerId.value == 'highlighted');
       _followUser = true;
     });
     if (_lastPosition != null && _mapController != null) {
@@ -938,6 +1208,7 @@ class _NewGpsModeScreenState extends ConsumerState<NewGpsModeScreen>
       setState(() {
         _messages.clear(); _landmarks.clear(); _markers.clear(); _polylines.clear();
         _selectedLandmark = null; _currentDirections = null; _recognisedLocation = null;
+        _lastFetchedCenter = null;
         _connected = false; _connecting = false; _lastUserMsgFinished = true; _lastAssistantMsgFinished = true;
       });
     }
@@ -1084,7 +1355,16 @@ class _NewGpsModeScreenState extends ConsumerState<NewGpsModeScreen>
       initialCameraPosition: CameraPosition(target: _lastPosition != null ? LatLng(_lastPosition!.latitude, _lastPosition!.longitude) : const LatLng(0, 0), zoom: _lastPosition != null ? 16.0 : 2.0),
       myLocationEnabled: true, myLocationButtonEnabled: false, markers: _markers, polylines: _polylines, mapType: MapType.normal,
       onCameraMoveStarted: () { if (_followUser && mounted && !_disposed) setState(() => _followUser = false); },
+      onCameraIdle: _onCameraIdle,
     );
+  }
+
+  Future<void> _onCameraIdle() async {
+    if (_mapController == null || _disposed) return;
+    final region = await _mapController!.getVisibleRegion();
+    final centerLat = (region.northeast.latitude + region.southwest.latitude) / 2;
+    final centerLng = (region.northeast.longitude + region.southwest.longitude) / 2;
+    _fetchLandmarksAtPosition(centerLat, centerLng);
   }
 }
 
@@ -1138,7 +1418,7 @@ class _LandmarkCarousel extends StatelessWidget {
                                         : Colors.white.withAlpha(50),
                                     width: 1)),
                             child: Row(mainAxisSize: MainAxisSize.min, children: [
-                              Icon(Icons.place,
+                              Icon(lm.fromNearbySearch ? Icons.near_me : Icons.place,
                                   color: isSelected
                                       ? Colors.white
                                       : Colors.white.withAlpha(200),
@@ -1279,6 +1559,169 @@ class _MicFab extends StatelessWidget {
                       size: 26,
                     ),
         ),
+      ),
+    );
+  }
+}
+
+class _LandmarkDetailSheet extends StatelessWidget {
+  final _Landmark landmark;
+  final VoidCallback onNavigate;
+  final VoidCallback onClose;
+
+  const _LandmarkDetailSheet({
+    required this.landmark,
+    required this.onNavigate,
+    required this.onClose,
+  });
+
+  String _formatType(String? type) {
+    if (type == null || type.isEmpty) return 'Place';
+    return type.replaceAll('_', ' ').split(' ').map((w) => w.isNotEmpty ? '${w[0].toUpperCase()}${w.substring(1)}' : '').join(' ');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomPad = MediaQuery.of(context).padding.bottom;
+    return Container(
+      margin: const EdgeInsets.only(top: 80),
+      decoration: const BoxDecoration(
+        color: Color(0xFF1E1E1E),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Drag handle
+          Container(
+            margin: const EdgeInsets.only(top: 12),
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Padding(
+            padding: EdgeInsets.fromLTRB(20, 20, 20, 16 + bottomPad),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Name
+                Text(
+                  landmark.name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Type badge
+                if (landmark.primaryType != null || landmark.types.isNotEmpty)
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      if (landmark.primaryType != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.blueAccent.withAlpha(40),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.blueAccent.withAlpha(80)),
+                          ),
+                          child: Text(
+                            _formatType(landmark.primaryType),
+                            style: const TextStyle(color: Colors.blueAccent, fontSize: 12, fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                    ],
+                  ),
+                if (landmark.primaryType != null || landmark.types.isNotEmpty)
+                  const SizedBox(height: 12),
+                // Rating
+                if (landmark.rating != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      children: [
+                        Text(
+                          landmark.rating!.toStringAsFixed(1),
+                          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(width: 6),
+                        ...List.generate(5, (i) {
+                          final starValue = landmark.rating! - i;
+                          return Icon(
+                            starValue >= 0.75 ? Icons.star_rounded : starValue >= 0.25 ? Icons.star_half_rounded : Icons.star_border_rounded,
+                            color: Colors.amber,
+                            size: 18,
+                          );
+                        }),
+                        if (landmark.userRatingCount != null) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            '(${landmark.userRatingCount})',
+                            style: const TextStyle(color: Colors.white54, fontSize: 13),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                // Address
+                if (landmark.address != null && landmark.address!.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.location_on_outlined, color: Colors.white54, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            landmark.address!,
+                            style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                // Coordinates
+                if (landmark.position != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.my_location, color: Colors.white38, size: 16),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${landmark.position!.latitude.toStringAsFixed(5)}, ${landmark.position!.longitude.toStringAsFixed(5)}',
+                          style: const TextStyle(color: Colors.white38, fontSize: 12, fontFamily: 'monospace'),
+                        ),
+                      ],
+                    ),
+                  ),
+                // Navigate button
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: onNavigate,
+                    icon: const Icon(Icons.directions_walk, size: 20),
+                    label: const Text('Get Walking Directions'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blueAccent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

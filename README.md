@@ -1,5 +1,7 @@
 <div align="center">
 
+![LORE Thumbnail](screenshots/Thumbnail.png)
+
 <img src="landing-page/app-icon.png" width="80" alt="LORE icon" />
 
 # LORE
@@ -27,13 +29,13 @@ Point your camera at any place. Speak any question. LORE generates a living docu
 
 LORE offers four distinct ways to experience the world as a documentary.
 
-### 📷 SightMode — Point. See. Understand.
-Point your camera at any monument or building and LORE instantly recognises it via Gemini Live vision and GPS grounding. It begins generating a narrated documentary with high-fidelity illustrations streaming in real time.
+### ✦ LoreMode — See + Ask = Something New.
+Camera AND voice simultaneously. LORE sees where you are AND hears your question — then generates a response that fuses both. This unlocks Alternate History scenarios grounded in your real location.
 
-- Camera captures live frames at 1fps
-- GPS context grounds the model to your exact location
-- Gemini Live streams narration audio
-- Gemini 3.1 Flash Image generates documentary-style illustrations
+- Simultaneous camera + voice input
+- Gemini fuses visual context with spoken intent
+- Alternate history scenarios grounded in your real backdrop
+- The signature LORE experience
 
 ### 🎙️ VoiceMode — Speak. Ask. Receive a film.
 Speak any topic and receive a fully interleaved documentary — narration, generated illustrations, and cinematic video clips — flowing together as a single coherent stream. Interrupt at any time to ask follow-up questions.
@@ -43,18 +45,19 @@ Speak any topic and receive a fully interleaved documentary — narration, gener
 - Veo 3.1 cinematic video clips on demand
 - Full session history with persistent chat
 
-### ✦ LoreMode — See + Ask = Something New.
-Camera AND voice simultaneously. LORE sees where you are AND hears your question — then generates a response that fuses both. This unlocks Alternate History scenarios grounded in your real location.
+### 📷 SightMode — Point. See. Understand.
+Point your camera at any monument or building and LORE instantly recognises it via Gemini Live vision and GPS grounding. It begins generating a narrated documentary with high-fidelity illustrations streaming in real time.
 
-- Simultaneous camera + voice input
-- Gemini fuses visual context with spoken intent
-- Alternate history scenarios grounded in your real backdrop
-- The signature LORE experience
+- Camera captures live frames at 1fps
+- GPS context grounds the model to your exact location
+- Gemini Live streams narration audio
+- Gemini 3.1 Flash Image generates documentary-style illustrations
 
-### 📍 GPS Walking Tour — Walk. Discover. Listen.
-Experience the history of your city as you walk through it. LORE tracks your position and auto-triggers narrations when you approach a landmark. Includes full Google Directions navigation.
+### 📍 GPS Tracking mode — Walk. Discover. Listen.
+Experience the history of your city as you walk through it. LORE tracks your position and auto-triggers narrations when you approach a landmark. The live map view is screen-shared with Gemini every 5 seconds so it can see your route, surroundings, and active navigation. Includes full Google Directions navigation.
 
 - Real-time GPS tracking with landmark detection
+- Live map screen sharing with Gemini
 - Auto-triggered narrations on significant movement
 - Google Directions API for walking navigation
 - Hands-free — the world narrates itself as you move
@@ -63,25 +66,7 @@ Experience the history of your city as you walk through it. LORE tracks your pos
 
 ## Architecture
 
-```
-Flutter Mobile App
-        │
-        │  WebSocket (wss://)
-        ▼
-┌─────────────────────────────┐
-│   Gemini Live Proxy         │  ← Transparent bidirectional WebSocket proxy
-│   Cloud Run · Port 8090     │    Handles ADC token refresh for Vertex AI
-└──────────┬──────────────────┘
-           │
-     ┌─────┴──────┐
-     ▼            ▼
-Gemini Live    Tool Calls
-   API         │        │
-(Vertex AI)    ▼        ▼
-          Image Srv  Video Srv
-          Port 8091  Port 8092
-          Gemini 3.1 Veo 3.1
-```
+![Architecture Diagram](screenshots/Architectire%20Diagram.png)
 
 ### Backend Services (Cloud Run)
 
@@ -104,10 +89,10 @@ Gemini Live    Tool Calls
 ```
 screens/
   home_screen.dart           — mode selection
-  sight_mode_screen.dart     — live camera + audio → Gemini Live
-  new_voice_mode_screen.dart — voice + image/video generation
   lore_mode_screen.dart      — camera + voice + GPS → Gemini Live
-  new_gps_mode_screen.dart   — GPS walking tour + Directions API
+  new_voice_mode_screen.dart — voice + image/video generation
+  sight_mode_screen.dart     — live camera + audio → Gemini Live
+  new_gps_mode_screen.dart   — GPS tracking + map screen sharing + Directions API
 
 services/
   camera_service.dart        — camera frame capture
@@ -197,7 +182,64 @@ flutter run --dart-define-from-file=dart-defines.json
 
 ---
 
+## Reproducible Testing
+
+### Easiest path — Install the pre-built APK (Android)
+
+All backend services are live on Cloud Run. The APK connects to them automatically — no API keys or backend setup required.
+
+1. **Download** `lore-v1.0.apk` from the [GitHub Releases](../../releases/latest) page.
+2. On your Android device, enable **Settings → Install unknown apps** for your browser.
+3. Open the downloaded APK and install.
+4. Grant camera, microphone, and location permissions when prompted.
+5. Open LORE and select any mode.
+
+> GPS Tracking mode requires a physical device — emulator GPS is not reliable enough for landmark detection.
+
+### Mode-by-mode test guide
+
+| Mode | What to try |
+|------|-------------|
+| **VoiceMode** | Tap the mic and say *"Tell me about the Roman Colosseum"* — narration + illustrations + video should follow |
+| **SightMode** | Point camera at any building and speak *"What is this place?"* |
+| **LoreMode** | Point camera at any backdrop, speak *"What would this place look like in ancient Rome?"* |
+| **GPS Mode** | Walk near any landmark — narration auto-triggers; tap a destination for walking directions |
+
+### Build from source
+
+If you prefer to build locally against the live backend:
+
+```bash
+# 1. Clone and install Flutter dependencies
+cd mobile && flutter pub get
+
+# 2. Create mobile/dart-defines.json pointing to live services:
+cat > mobile/dart-defines.json << 'EOF'
+{
+  "GEMINI_PROXY_URL": "wss://lore-gemini-proxy-2we3jhrqzq-uc.a.run.app",
+  "NANO_ILLUSTRATOR_URL": "https://lore-nano-illustrator-2we3jhrqzq-uc.a.run.app/generate",
+  "VEO_GENERATOR_URL": "https://lore-veo-generator-2we3jhrqzq-uc.a.run.app/generate",
+  "GCP_PROJECT_ID": "geminiliveagent-487800",
+  "GOOGLE_MAPS_API_KEY": "<your-maps-api-key>",
+  "GOOGLE_GENAI_USE_VERTEXAI": "true"
+}
+EOF
+
+# 3. Run on a connected device
+flutter run --dart-define-from-file=dart-defines.json
+```
+
+> A `GOOGLE_MAPS_API_KEY` is only required for GPS Tracking mode. The other three modes work without it.
+
+---
+
 ## Cloud Deployment
+
+### Proof of Cloud Deployment
+
+![Cloud Deployment](screenshots/Cloud%20Deployment.png)
+
+- **[☁️ Cloud Deployment Proof (Video)](https://drive.google.com/file/d/1XUXpWj95vSaJuFwEia5FYDLE9AGGrUTd/view)**
 
 ### Bootstrap (first time only)
 
@@ -272,9 +314,38 @@ GOOGLE_GENAI_USE_VERTEXAI=true
 
 ---
 
+## Screenshots & Video Demo
+
+### Video Demo
+[![Video Demo](https://img.youtube.com/vi/jkc9dAexUZs/0.jpg)](https://youtu.be/jkc9dAexUZs)
+
+*(Click above to watch the video demo on YouTube)*
+
+### Mobile Screenshots
+![Mobile Screenshots](screenshots/Mobile%20Screenshots.png)
+
+---
+
+## Roadmap: What's next for LORE
+
+- **Branch Documentaries** — Tap any claim during narration to instantly branch into a sub-documentary on that topic, up to 3 levels deep.
+- **Historical Character Encounters** — Converse with AI-powered historical figures at relevant locations (Marcus Aurelius at the Colosseum, da Vinci in Florence).
+- **Chronicle Export** — Generate illustrated PDFs of any documentary session with citations, timestamps, and generated imagery.
+- **Depth Dial** — Adjust content complexity from Explorer (casual) to Scholar to Expert (academic depth).
+- **Multilingual support** — 24 languages with cultural adaptation.
+- **App Store & Play Store release** — Bringing immersive history to everyone.
+
+---
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
 ## Notes
 
-- **GPS mode** requires a physical device — emulator GPS is unreliable.
+- **GPS Tracking mode** requires a physical device — emulator GPS is unreliable.
 - **Local dev** uses AI Studio by default. Do not set `GCP_PROJECT_ID` in `dart-defines.json` for local dev.
 - The Maps API key appears in `AndroidManifest.xml` by design (required by Maps SDK) — restrict it by Android app signature in GCP Console.
 - See [`SETUP.md`](SETUP.md) for the full deployment guide including Secret Manager setup and pre-publish checklist.

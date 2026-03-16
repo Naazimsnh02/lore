@@ -171,7 +171,7 @@ class _ChatMsg {
   Uint8List? imageBytes;
   String? imageMime;
   String? videoUrl;
-  final _ChatMsgKind kind;
+  _ChatMsgKind kind;
   final DateTime timestamp;
 
   _ChatMsg({
@@ -315,6 +315,7 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
 
   // ── Transcript overlay ─────────────────────────────────────────────────────
   final List<_ChatMsg> _messages = [];
+  final Set<String> _pendingGenerations = {};
   final ScrollController _scrollCtrl = ScrollController();
   bool _lastMsgFinished = true;
   bool _lastUserMsgFinished = true;
@@ -595,41 +596,41 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
           'parts': [
             {
               'text':
-                  'You are LORE, an expert guide who turns a live camera view into a rich documentary experience. '
-                  'The user is pointing their camera at something and wants to understand what they are looking at — '
-                  'what it is, why it matters, and what makes it fascinating.\n\n'
-                  'GPS CONTEXT:\n'
-                  'You may receive [GPS: lat=..., lon=..., accuracy=...m, address="..."] messages. '
-                  'Use the address silently to enrich your narration. Never read out or mention these messages.\n\n'
+                  'You are LORE, an expert visual guide. The user is pointing their camera at something '
+                  'and wants to know what it is, why it matters, and what makes it fascinating. '
+                  'Your job is to identify and explain exactly what is in the camera view — nothing more.\n\n'
+                  'INPUTS YOU HAVE:\n'
+                  '- Live camera feed (your primary input — everything you say must relate to what is visible).\n'
+                  '- GPS context as [GPS: lat=..., lon=..., accuracy=...m, address="..."] messages. '
+                  'Use the address silently to enrich your narration. Never read out or mention GPS messages.\n'
+                  '- The user\'s voice questions.\n\n'
                   'HOW TO RESPOND:\n'
-                  'Wait for the user to speak. When they ask a question, lead with identity and significance — '
-                  'name the subject confidently, then deliver the most compelling facts, history, and context '
-                  'a knowledgeable local expert would share. Keep responses to 3-5 sentences. '
-                  'Never start with "I can see..." or "In this image..." — jump straight to the subject. '
-                  'Always respond in English.\n\n'
-                  'WHAT TO COVER:\n'
-                  '- Landmarks and buildings: name, age, who built it and why, architectural style, '
-                  'historical events, cultural significance.\n'
+                  '1. Wait for the user to speak or ask a question.\n'
+                  '2. Lead with identity — name the subject confidently.\n'
+                  '3. Deliver 2-4 sentences of compelling facts, history, and context '
+                  'a knowledgeable local expert would share.\n'
+                  '4. Never start with "I can see..." or "In this image..." — jump straight to the subject.\n'
+                  '5. If the camera view is unclear or ambiguous, say what the subject most likely is '
+                  'and ask one short clarifying question.\n'
+                  '6. Always respond in English.\n\n'
+                  'WHAT TO COVER (based on what is visible):\n'
+                  '- Landmarks and buildings: name, age, builder, architectural style, historical events.\n'
                   '- Natural features: geological formation, ecological significance, local legends.\n'
-                  '- Art and sculptures: artist, period, technique, symbolism, the story behind it.\n'
+                  '- Art and sculptures: artist, period, technique, symbolism.\n'
                   '- Streets and neighbourhoods: history, famous residents, key events.\n\n'
-                  'ALTERNATE HISTORY:\n'
-                  'When the user asks "what if" or "imagine if" — engage fully and creatively. '
-                  'Always call generate_image after alternate history narration to visualise the alternate world. '
-                  'For scenarios involving motion, call generate_video instead.\n\n'
+                  'SPECULATIVE QUESTIONS:\n'
                   'VISUAL STORYTELLING:\n'
-                  'After every narration about a landmark, historical figure, natural wonder, architectural marvel, '
-                  'civilisation, artwork, or cultural scene — call generate_image immediately. '
-                  'After any alternate history response — call generate_image (or generate_video for motion). '
-                  'Skip generate_image only if you already generated one in the last 2 turns.\n\n'
+                  'If your narration covers a visually rich subject (landmark, historical figure, natural wonder, '
+                  'artwork, cultural scene) and no image was generated in the last 2 turns, call generate_image. '
+                  'Call at most one visual tool per turn.\n\n'
                   'TOOL RULES:\n'
-                  '1. generate_image — call after every visually rich narration and every alternate history response. '
-                  'Also call when the user says "show", "image", "picture", "draw", or "illustrate". '
+                  '1. generate_image — call when narration covers a visually compelling subject, '
+                  'or when the user says "show", "image", "picture", "draw", or "illustrate". '
                   'Write a detailed cinematic prompt: subject, lighting, style, era, mood.\n'
-                  '2. generate_video — call when the user says "video", "animate", "motion", "footage", '
-                  '"clip", or "bring it to life". Also for dramatic alternate history involving movement. '
-                  'Before calling, say: "Generating your video now — this takes about 60 to 90 seconds."\n\n'
-                  'IMPORTANT: When a tool is needed, call it immediately. '
+                  '2. generate_video — call only when the user explicitly says "video", "animate", "motion", '
+                  '"footage", "clip", or "bring it to life". '
+                  'Before calling, say: "Generating your video now — this takes about 60 to 90 seconds." '
+                  'Do not call both generate_image and generate_video in the same turn.\n\n'
                   'Never output <think>, <thinking>, or <tool_use> tags.',
             }
           ],
@@ -727,10 +728,12 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
           }
         case _GeminiMsgType.inputTranscription:
           if (msg.text != null && msg.text!.isNotEmpty) {
+            debugPrint('[SightMode] inputTranscription: ${msg.text}');
             _appendTranscript(msg.text!, isUser: true, finished: msg.textFinished ?? false);
           }
         case _GeminiMsgType.outputTranscription:
           if (msg.text != null && msg.text!.isNotEmpty) {
+            debugPrint('[SightMode] outputTranscription: ${msg.text}');
             _appendTranscript(msg.text!, isUser: false, finished: msg.textFinished ?? false);
           }
         case _GeminiMsgType.turnComplete:
@@ -771,6 +774,7 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
       final id = c['id'] as String? ?? '';
       final prompt =
           (c['args'] as Map<String, dynamic>?)?['prompt'] as String? ?? '';
+      if (_pendingGenerations.contains(id)) continue;
       if (name == 'generate_image') {
         final loadingId = _addLoadingMsg('Generating image...');
         _runGenerateImage(id, prompt, loadingId);
@@ -792,14 +796,39 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
     return id;
   }
 
-  void _removeLoadingMsg(String id) {
-    if (mounted && !_disposed) {
-      setState(() => _messages.removeWhere((m) => m.id == id));
-    }
+  // Updates the loading bubble in-place so it is never lost from the list.
+  void _resolveLoadingMsg(String id, {
+    Uint8List? imageBytes,
+    String? imageMime,
+    String? videoUrl,
+    bool remove = false,
+  }) {
+    if (!mounted || _disposed) return;
+    setState(() {
+      final idx = _messages.indexWhere((m) => m.id == id);
+      if (idx == -1) return;
+      if (remove) {
+        _messages.removeAt(idx);
+        return;
+      }
+      final m = _messages[idx];
+      if (imageBytes != null) {
+        m.imageBytes = imageBytes;
+        m.imageMime = imageMime;
+        m.kind = _ChatMsgKind.image;
+        m.text = '';
+      } else if (videoUrl != null) {
+        m.videoUrl = videoUrl;
+        m.kind = _ChatMsgKind.video;
+        m.text = '';
+      }
+    });
   }
 
   Future<void> _runGenerateImage(
       String callId, String prompt, String loadingId) async {
+    if (_pendingGenerations.contains(callId)) return;
+    _pendingGenerations.add(callId);
     try {
       final resp = await http
           .post(
@@ -808,21 +837,13 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
             body: json.encode({'prompt': prompt}),
           )
           .timeout(const Duration(seconds: 60));
-      _removeLoadingMsg(loadingId);
       if (resp.statusCode == 200) {
         final body = json.decode(resp.body) as Map<String, dynamic>;
         final b64 = body['image_base64'] as String?;
         final mime = body['mime_type'] as String? ?? 'image/png';
         if (b64 != null && b64.isNotEmpty) {
-          final msg = _ChatMsg(
-            id: '${DateTime.now().microsecondsSinceEpoch}',
-            isUser: false,
-            text: '',
-            imageBytes: base64Decode(b64),
-            imageMime: mime,
-            kind: _ChatMsgKind.image,
-          );
-          if (mounted && !_disposed) setState(() => _messages.add(msg));
+          _resolveLoadingMsg(loadingId,
+              imageBytes: base64Decode(b64), imageMime: mime);
           _scrollToBottom();
           _saveSession();
           _wsSend({
@@ -841,7 +862,7 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
       }
       throw Exception('HTTP ${resp.statusCode}');
     } catch (e) {
-      _removeLoadingMsg(loadingId);
+      _resolveLoadingMsg(loadingId, remove: true);
       _wsSend({
         'tool_response': {
           'function_responses': [
@@ -853,11 +874,15 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
           ]
         }
       });
+    } finally {
+      _pendingGenerations.remove(callId);
     }
   }
 
   Future<void> _runGenerateVideo(
       String callId, String prompt, String loadingId) async {
+    if (_pendingGenerations.contains(callId)) return;
+    _pendingGenerations.add(callId);
     final host = Uri.parse(_kDefaultProxyUrl).host;
     try {
       final resp = await http
@@ -867,19 +892,11 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
             body: json.encode({'prompt': prompt}),
           )
           .timeout(const Duration(minutes: 4));
-      _removeLoadingMsg(loadingId);
       if (resp.statusCode == 200) {
         final body = json.decode(resp.body) as Map<String, dynamic>;
         final videoUrl = body['video_url'] as String?;
         if (videoUrl != null && videoUrl.isNotEmpty) {
-          final msg = _ChatMsg(
-            id: '${DateTime.now().microsecondsSinceEpoch}',
-            isUser: false,
-            text: '',
-            videoUrl: videoUrl,
-            kind: _ChatMsgKind.video,
-          );
-          if (mounted && !_disposed) setState(() => _messages.add(msg));
+          _resolveLoadingMsg(loadingId, videoUrl: videoUrl);
           _scrollToBottom();
           _saveSession();
           _wsSend({
@@ -898,7 +915,7 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
       }
       throw Exception('HTTP ${resp.statusCode}');
     } catch (e) {
-      _removeLoadingMsg(loadingId);
+      _resolveLoadingMsg(loadingId, remove: true);
       _wsSend({
         'tool_response': {
           'function_responses': [
@@ -910,6 +927,8 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
           ]
         }
       });
+    } finally {
+      _pendingGenerations.remove(callId);
     }
   }
 
@@ -921,6 +940,12 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
 
     setState(() {
       final lastFinished = isUser ? _lastUserMsgFinished : _lastMsgFinished;
+      
+      // We only append if:
+      // 1. The previous message wasn't finished
+      // 2. There is a previous message
+      // 3. The previous message belongs to the SAME role (User or AI)
+      // 4. The previous message is a text bubble
       if (!lastFinished &&
           _messages.isNotEmpty &&
           _messages.last.isUser == isUser &&
@@ -939,6 +964,7 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
           }
         }
       } else {
+        // Create a fresh bubble
         _messages.add(_ChatMsg(
           id: '${DateTime.now().microsecondsSinceEpoch}',
           isUser: isUser,
@@ -1181,7 +1207,7 @@ class _SightModeScreenState extends ConsumerState<SightModeScreen>
                     ),
                     const SizedBox(height: 5),
                     Text(
-                      _recording ? 'listening...' : 'tap to mute',
+                      _recording ? 'listening...' : 'tap to speak',
                       style: const TextStyle(
                           color: Colors.white38,
                           fontSize: 10,
@@ -1308,17 +1334,39 @@ class _ChatBubble extends StatelessWidget {
       );
     }
     if (msg.text.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Text(
-        msg.text,
-        style: TextStyle(
+
+    return Align(
+      alignment:
+          msg.isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 3),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.78),
+        decoration: BoxDecoration(
           color: msg.isUser
               ? Colors.greenAccent.withAlpha(200)
-              : Colors.white.withAlpha(220),
-          fontSize: 13,
-          height: 1.5,
-          letterSpacing: 0.1,
+              : Colors.black.withAlpha(140),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(14),
+            topRight: const Radius.circular(14),
+            bottomLeft: Radius.circular(msg.isUser ? 14 : 4),
+            bottomRight: Radius.circular(msg.isUser ? 4 : 14),
+          ),
+          border: Border.all(
+            color: msg.isUser
+                ? Colors.greenAccent
+                : Colors.white.withAlpha(20),
+          ),
+        ),
+        child: Text(
+          msg.text,
+          style: TextStyle(
+            color: msg.isUser ? Colors.black : Colors.white,
+            fontSize: 13,
+            height: 1.4,
+          ),
         ),
       ),
     );
